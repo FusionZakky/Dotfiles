@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+trap 'tput cnorm; clear; exit 0' INT TERM EXIT
+tput civis
+clear
+
+source ~/.local/state/quickshell/user/generated/rice-colors.sh 2>/dev/null
+RICE_ACCENT="${RICE_ACCENT:-#d9514e}"
+RICE_ACCENT_DEEP="${RICE_ACCENT_DEEP:-#8f2f2d}"
+
+hex_to_rgb() {
+  local hex="${1#\#}"
+  echo "$((16#${hex:0:2})) $((16#${hex:2:2})) $((16#${hex:4:2}))"
+}
+read -r ar ag ab <<< "$(hex_to_rgb "$RICE_ACCENT")"
+read -r dr dg db <<< "$(hex_to_rgb "$RICE_ACCENT_DEEP")"
+
+BRIGHT=$(printf '\033[1;38;2;%d;%d;%dm' "$ar" "$ag" "$ab")
+DIM=$(printf '\033[38;2;%d;%d;%dm' "$dr" "$dg" "$db")
+RESET='\033[0m'
+chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*(){}[]<>/\?'
+TRAIL=4
+
+cols=$(tput cols)
+lines=$(tput lines)
+declare -a head
+declare -a speed
+init_columns() {
+  for ((c=0; c<cols; c++)); do
+    head[c]=$(( -1 * (RANDOM % lines) ))
+    speed[c]=1
+  done
+}
+init_columns
+
+while true; do
+  newcols=$(tput cols)
+  newlines=$(tput lines)
+  if [ "$newcols" != "$cols" ] || [ "$newlines" != "$lines" ]; then
+    cols=$newcols
+    lines=$newlines
+    clear
+    init_columns
+  fi
+
+  for ((c=0; c<cols; c++)); do
+    h=${head[c]}
+    if (( h >= 0 && h < lines )); then
+      ch="${chars:RANDOM%${#chars}:1}"
+      printf '\033[%d;%dH%b%s%b' "$((h+1))" "$((c+1))" "$BRIGHT" "$ch" "$RESET"
+    fi
+    t=$((h - TRAIL))
+    if (( t >= 0 && t < lines )); then
+      printf '\033[%d;%dH ' "$((t+1))" "$((c+1))"
+    fi
+    head[c]=$((h + 1))
+    if (( head[c] - TRAIL > lines )); then
+      head[c]=$(( -1 * (RANDOM % lines) ))
+    fi
+  done
+  sleep 0.05
+done

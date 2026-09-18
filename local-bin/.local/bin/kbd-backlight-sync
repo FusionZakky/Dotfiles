@@ -1,0 +1,42 @@
+#!/bin/bash
+# Sets keyboard backlight based on current screen brightness (inverse relationship).
+# Above THRESHOLD% screen brightness: keyboard backlight is off.
+# From THRESHOLD% down to 0% screen brightness: keyboard backlight scales linearly 0% -> 100%.
+# Run automatically by udev whenever intel_backlight changes, and also called
+# by kbd-backlight-set when returning from idle. Runs as root when invoked by udev.
+
+SCREEN_BL=/sys/class/backlight/intel_backlight/brightness
+SCREEN_MAX=/sys/class/backlight/intel_backlight/max_brightness
+KBD_LED=/sys/class/leds/chromeos::kbd_backlight/brightness
+KBD_MAX=/sys/class/leds/chromeos::kbd_backlight/max_brightness
+IDLE_FLAG=/tmp/kbd-backlight-idle
+
+# Screen brightness % below which keyboard backlight stays off entirely
+THRESHOLD=40
+
+# If we're currently in the idle/off state, don't override it - stay off until activity resumes
+if [ -f "$IDLE_FLAG" ]; then
+    exit 0
+fi
+
+SCREEN_CUR=$(cat "$SCREEN_BL")
+SCREEN_MAXVAL=$(cat "$SCREEN_MAX")
+KBD_MAXVAL=$(cat "$KBD_MAX")
+
+SCREEN_PERCENT=$(( SCREEN_CUR * 100 / SCREEN_MAXVAL ))
+
+if [ "$SCREEN_PERCENT" -le "$THRESHOLD" ]; then
+    # Scale [0, THRESHOLD] -> [100, 0] linearly - dimmer screen = brighter keyboard
+    KBD_PERCENT=$(( (THRESHOLD - SCREEN_PERCENT) * 100 / THRESHOLD ))
+else
+    KBD_PERCENT=0
+fi
+
+# Clamp between 0 and 100 just in case
+if [ "$KBD_PERCENT" -lt 0 ]; then KBD_PERCENT=0; fi
+if [ "$KBD_PERCENT" -gt 100 ]; then KBD_PERCENT=100; fi
+
+KBD_VAL=$(( KBD_MAXVAL * KBD_PERCENT / 100 ))
+
+# Write directly - this script runs as root when triggered by udev
+echo "$KBD_VAL" > "$KBD_LED" 2>/dev/null || echo "$KBD_VAL" | sudo /usr/bin/tee "$KBD_LED" > /dev/null

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+SESSION="rice"
+
+source ~/.local/state/quickshell/user/generated/rice-colors.sh 2>/dev/null
+RICE_BG="${RICE_BG:-#161616}"
+RICE_FG="${RICE_FG:-#e8e6e6}"
+RICE_ACCENT="${RICE_ACCENT:-#d9514e}"
+RICE_ACCENT_DEEP="${RICE_ACCENT_DEEP:-#8f2f2d}"
+
+tmux kill-session -t "$SESSION" 2>/dev/null
+
+tmux new-session -d -s "$SESSION"
+tmux split-window -h -t "$SESSION:0"
+tmux split-window -v -t "$SESSION:0.1"
+
+tmux send-keys -t "$SESSION:0.0" 'btop' Enter
+tmux send-keys -t "$SESSION:0.1" 'fastfetch; echo; echo "press enter to close"; read' Enter
+tmux send-keys -t "$SESSION:0.2" 'clear; matrix-rain' Enter
+
+tmux set-option -t "$SESSION" status-style "bg=$RICE_BG,fg=$RICE_FG"
+tmux set-option -t "$SESSION" status-left "#[fg=$RICE_ACCENT,bold] #S "
+tmux set-option -t "$SESSION" status-right "#[fg=$RICE_ACCENT_DEEP]%H:%M %d-%b-%y"
+tmux set-option -t "$SESSION" pane-border-style "fg=$RICE_BG"
+tmux set-option -t "$SESSION" pane-active-border-style "fg=$RICE_BG"
+
+tmux bind-key -T root -n C-q kill-session -t "$SESSION"
+
+tmux select-pane -t "$SESSION:0.0"
+tmux attach -t "$SESSION"

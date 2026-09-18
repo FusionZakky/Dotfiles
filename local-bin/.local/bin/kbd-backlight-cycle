@@ -1,0 +1,25 @@
+#!/bin/bash
+# Cycles Chromebook keyboard backlight through 4 steps like ChromeOS: off -> low -> medium -> high -> off
+LED=/sys/class/leds/chromeos::kbd_backlight/brightness
+MAX=$(cat /sys/class/leds/chromeos::kbd_backlight/max_brightness)
+CURRENT=$(cat "$LED")
+
+# Define steps as percentages of max
+STEPS=(0 33 66 100)
+
+# Find current step index (closest match) and advance to next
+NEXT=0
+for i in "${!STEPS[@]}"; do
+    STEP_VAL=$(( MAX * STEPS[i] / 100 ))
+    if [ "$CURRENT" -le "$STEP_VAL" ]; then
+        NEXT=$(( (i + 1) % ${#STEPS[@]} ))
+        break
+    fi
+    NEXT=0
+done
+
+NEW_VAL=$(( MAX * STEPS[NEXT] / 100 ))
+echo "$NEW_VAL" > "$LED"
+
+# Optional: notify so you can see the level change
+notify-send -t 800 "Keyboard Backlight" "${STEPS[NEXT]}%" -h int:value:${STEPS[NEXT]} 2>/dev/null

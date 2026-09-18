@@ -1,0 +1,24 @@
+#!/bin/bash
+# Called by hypridle on idle timeout/resume.
+# Usage: kbd-backlight-set on|off
+
+LED=/sys/class/leds/chromeos::kbd_backlight/brightness
+MAX=$(cat /sys/class/leds/chromeos::kbd_backlight/max_brightness)
+IDLE_FLAG=/tmp/kbd-backlight-idle
+SYNC_SCRIPT="$HOME/.local/bin/kbd-backlight-sync"
+
+case "$1" in
+  on)
+    rm -f "$IDLE_FLAG"
+    # Recalculate from current screen brightness rather than a fixed value
+    sudo "$SYNC_SCRIPT"
+    ;;
+  off)
+    touch "$IDLE_FLAG"
+    echo 0 | sudo /usr/bin/tee "$LED" > /dev/null
+    ;;
+  *)
+    echo "Usage: $0 on|off" >&2
+    exit 1
+    ;;
+esac
