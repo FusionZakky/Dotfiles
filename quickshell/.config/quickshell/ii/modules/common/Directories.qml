@@ -35,6 +35,10 @@ Singleton {
     property string shellConfigPath: `${Directories.shellConfig}/${Directories.shellConfigName}`
 	property string todoPath: FileUtils.trimFileProtocol(`${Directories.state}/user/todo.json`)
 	property string notesPath: FileUtils.trimFileProtocol(`${Directories.state}/user/notes.txt`)
+	property string notesDir: FileUtils.trimFileProtocol(`${Directories.state}/user/notes/active`)
+	property string notesArchiveDir: FileUtils.trimFileProtocol(`${Directories.state}/user/notes/archived`)
+	property string notesTrashDir: FileUtils.trimFileProtocol(`${Directories.state}/user/notes/trash`)
+	property string notesAssetsDir: FileUtils.trimFileProtocol(`${Directories.state}/user/notes/assets`)
 	property string conflictCachePath: FileUtils.trimFileProtocol(`${Directories.cache}/conflict-killer`)
     property string notificationsPath: FileUtils.trimFileProtocol(`${Directories.cache}/notifications/notifications.json`)
     property string generatedMaterialThemePath: FileUtils.trimFileProtocol(`${Directories.state}/user/generated/colors.json`)
@@ -61,6 +65,11 @@ Singleton {
         Quickshell.execDetached(["bash", "-c", `rm -rf '${cliphistDecode}'; mkdir -p '${cliphistDecode}'`])
         Quickshell.execDetached(["mkdir", "-p", `${aiChats}`])
         Quickshell.execDetached(["mkdir", "-p", `${userActions}`])
+        Quickshell.execDetached(["mkdir", "-p", `${notesDir}`])
+        Quickshell.execDetached(["mkdir", "-p", `${notesArchiveDir}`])
+        Quickshell.execDetached(["mkdir", "-p", `${notesTrashDir}`])
+        Quickshell.execDetached(["mkdir", "-p", `${notesAssetsDir}`])
+        Quickshell.execDetached(["bash", "-c", `find '${notesTrashDir}' -type f -mtime +30 -delete`])
         Quickshell.execDetached(["rm", "-rf", `${tempImages}`])
     }
 }

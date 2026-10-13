@@ -1,5 +1,7 @@
 import qs.services
 import qs.modules.common
+import qs.modules.ii.sidebarLeft.notes
+import qs.modules.ii.sidebarLeft.transfers
 import qs.modules.common.widgets
 import QtQuick
 import QtQuick.Controls
@@ -12,11 +14,15 @@ Item {
     required property var scopeRoot
     property int sidebarPadding: 10
     anchors.fill: parent
+    property bool notesEnabled: Config.options.sidebar.notes.enable
+    property bool transfersEnabled: Config.options.sidebar.localsend.enable
     property bool aiChatEnabled: Config.options.policies.ai !== 0
     property bool translatorEnabled: Config.options.sidebar.translator.enable
-    property bool animeEnabled: Config.options.policies.weeb !== 0
+    property bool animeEnabled: false
     property bool animeCloset: Config.options.policies.weeb === 2
     property var tabButtonList: [
+        ...(root.notesEnabled ? [{"icon": "sticky_note_2", "name": Translation.tr("Notes")}] : []),
+        ...(root.transfersEnabled ? [{"icon": "send", "name": Translation.tr("Transfers")}] : []),
         ...(root.aiChatEnabled ? [{"icon": "neurology", "name": Translation.tr("Intelligence")}] : []),
         ...(root.translatorEnabled ? [{"icon": "translate", "name": Translation.tr("Translator")}] : []),
         ...((root.animeEnabled && !root.animeCloset) ? [{"icon": "bookmark_heart", "name": Translation.tr("Anime")}] : [])
@@ -84,6 +90,8 @@ Item {
                 }
 
                 contentChildren: [
+                    ...(root.notesEnabled ? [notesTab.createObject()] : []),
+                    ...(root.transfersEnabled ? [transfersTab.createObject()] : []),
                     ...(root.aiChatEnabled ? [aiChat.createObject()] : []),
                     ...(root.translatorEnabled ? [translator.createObject()] : []),
                     ...((root.tabButtonList.length === 0 || (!root.aiChatEnabled && !root.translatorEnabled && root.animeCloset)) ? [placeholder.createObject()] : []),
@@ -92,6 +100,14 @@ Item {
             }
         }
 
+        Component {
+            id: notesTab
+            NotesRoot {}
+        }
+        Component {
+            id: transfersTab
+            TransfersTab {}
+        }
         Component {
             id: aiChat
             AiChat {}

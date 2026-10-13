@@ -158,3 +158,4 @@ hl.bind("SUPER + SHIFT + ALT + H", function()
     w.at = { 100, 100 }
     w.size = { 800, 600 }
 end, { description = "Geometry test: write" })
+

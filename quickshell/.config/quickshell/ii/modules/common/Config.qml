@@ -82,7 +82,7 @@ Singleton {
 
             property JsonObject policies: JsonObject {
                 property int ai: 1 // 0: No | 1: Yes | 2: Local
-                property int weeb: 1 // 0: No | 1: Open | 2: Closet
+                property int weeb: 0 // 0: No | 1: Open | 2: Closet
             }
 
             property JsonObject ai: JsonObject {
@@ -510,6 +510,12 @@ Singleton {
                 }
                 property JsonObject ai: JsonObject {
                     property bool textFadeIn: false
+                }
+                property JsonObject notes: JsonObject {
+                    property bool enable: true
+                }
+                property JsonObject localsend: JsonObject {
+                    property bool enable: true
                 }
                 property JsonObject booru: JsonObject {
                     property bool allowNsfw: false

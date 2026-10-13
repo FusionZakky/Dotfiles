@@ -1,2 +1,8 @@
 **/wallpaper-picker-keys.json
 *.bak*
+# generated or volatile: present locally, never tracked
+fish/.config/fish/fish_variables
+kitty/.config/kitty/colors.conf
+btop/.config/btop/themes/matugen.theme
+micro/.config/micro/backups/
+micro/.config/micro/buffers/
