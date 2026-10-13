@@ -1,2 +1,7 @@
 #!/bin/bash
-exec systemctl poweroff
+# Bare `shutdown` (what the launcher runs) powers off now instead of systemd's default "+1".
+# Anything with arguments (-r now, -h +10, -c, ...) goes to the real binary untouched.
+if [ "$#" -eq 0 ]; then
+  exec systemctl poweroff
+fi
+exec /usr/bin/shutdown "$@"
