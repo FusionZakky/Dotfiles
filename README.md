@@ -51,7 +51,8 @@ Requires `stow`. Some apps (ii saving `config.json`, KDE apps saving `*rc` files
 - Wallpaper picker (wallhaven, unsplash, pexels and more)
 - Notes and Transfers tabs in the left sidebar
 - Taeko WirePlumber audio override; keyboard backlight scripts and udev rules (no ambient light sensor on this device)
-- `shutdown` wrapper that powers off immediately (systemd's `shutdown` defaults to a 1 minute delay)
+- `shutdown` wrapper: a bare `shutdown` powers off immediately (systemd defaults to a 1 minute delay); any arguments pass through to the real binary
+- `custom/env.lua` puts `~/.local/bin` on the PATH of everything Hyprland spawns (launcher, Quickshell, keybind commands)
 
 ## Known quirks
 
