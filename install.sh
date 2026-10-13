@@ -20,7 +20,7 @@ if ! command -v stow &>/dev/null; then
   exit 1
 fi
 
-EXCLUDE=("system")
+EXCLUDE=("system" "packages")
 PACKAGES=()
 for d in */; do
   name="${d%/}"

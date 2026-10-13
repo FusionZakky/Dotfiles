@@ -1,0 +1,26 @@
+bleopt prompt_ps1_final='$(starship module character)'
+ble-face command_builtin='fg=243'
+ble-face command_alias='fg=4'
+ble-face command_function='fg=4'
+ble-face command_file='fg=4'
+ble-face command_keyword='fg=243,bold'
+ble-face command_directory='fg=6,underline'
+ble-face argument_option='fg=6'
+ble-face argument_error='fg=244'
+ble-face syntax_error='fg=244,underline'
+ble-face syntax_quoted='fg=251'
+ble-face syntax_varname='fg=2'
+ble-face syntax_comment='fg=8'
+ble-face filename_directory='fg=6,underline'
+ble-face auto_complete='fg=8'
+bleopt prompt_ps1_transient=always
+
+# Enter always runs the buffer (pasted multi-line blocks and heredocs run instead of waiting)
+ble-bind -m emacs -f RET accept-line
+ble-bind -m emacs -f C-m accept-line
+
+# Ctrl+Shift+V: paste straight from the Wayland clipboard (terminal forwards the key to ble.sh)
+function my/wl-paste { local t; t=$(wl-paste -n 2>/dev/null); READLINE_LINE=${READLINE_LINE:0:READLINE_POINT}${t}${READLINE_LINE:READLINE_POINT}; READLINE_POINT=$((READLINE_POINT+${#t})); }
+ble-bind -x 'C-S-v' 'my/wl-paste'
+ble-face varname_new='fg=251'
+ble-face filename_executable='fg=4,underline'

@@ -1,0 +1,10 @@
+[Unit]
+Description=LocalSend Daemon
+After=network.target
+
+[Service]
+ExecStart=/home/zakkaria/.local/bin/localsendd --unattended
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

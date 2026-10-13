@@ -1,0 +1,5 @@
+export RICE_BG="{{colors.background.default.hex}}"
+export RICE_FG="{{colors.on_background.default.hex}}"
+export RICE_ACCENT="{{colors.primary.default.hex}}"
+export RICE_ACCENT_DEEP="{{colors.tertiary.default.hex}}"
+export RICE_OUTLINE="{{colors.outline.default.hex}}"

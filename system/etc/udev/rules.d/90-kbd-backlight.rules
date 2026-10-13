@@ -1,0 +1,1 @@
+SUBSYSTEM=="leds", KERNEL=="chromeos::kbd_backlight", TAG+="uaccess"

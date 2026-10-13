@@ -1,0 +1,1 @@
+SUBSYSTEM=="backlight", KERNEL=="intel_backlight", RUN+="/home/zakkaria/.local/bin/kbd-backlight-sync"

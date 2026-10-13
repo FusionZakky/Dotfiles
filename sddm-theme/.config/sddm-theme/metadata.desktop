@@ -1,0 +1,7 @@
+[SddmGreeterTheme]
+Name=HyprCustom
+Author=User
+Description=Custom theme using media from ~/Pictures/sddm_media/
+ConfigFile=theme.conf
+Theme-Id=hyprcustom
+MainScript=Main.qml

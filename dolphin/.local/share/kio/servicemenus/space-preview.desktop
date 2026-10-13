@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Service
+MimeType=application/octet-stream;inode/directory;all/allfiles;
+Actions=SpacePreview
+
+[Desktop Action SpacePreview]
+Name=Quick Preview
+Icon=view-preview
+Exec=/home/zakkaria/.local/bin/fast-preview.sh "%f"

@@ -1,0 +1,19 @@
+[Default Applications]
+text/html=vivaldi-stable.desktop
+x-scheme-handler/http=vivaldi-stable.desktop
+x-scheme-handler/https=vivaldi-stable.desktop
+x-scheme-handler/about=vivaldi-stable.desktop
+x-scheme-handler/unknown=vivaldi-stable.desktop
+x-scheme-handler/slack=slack.desktop
+application/vnd.openxmlformats-officedocument.wordprocessingml.document=wordcraft.desktop
+application/msword=wordcraft.desktop
+application/vnd.oasis.opendocument.text=wordcraft.desktop
+application/vnd.openxmlformats-officedocument.spreadsheetml.sheet=gridcraft.desktop
+application/vnd.ms-excel=gridcraft.desktop
+text/csv=gridcraft.desktop
+application/vnd.oasis.opendocument.spreadsheet=gridcraft.desktop
+application/vnd.openxmlformats-officedocument.presentationml.presentation=deckcraft.desktop
+application/vnd.ms-powerpoint=deckcraft.desktop
+application/vnd.oasis.opendocument.presentation=deckcraft.desktop
+
+[Added Associations]

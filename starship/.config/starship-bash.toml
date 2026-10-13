@@ -1,0 +1,60 @@
+add_newline = false
+command_timeout = 500
+
+format = """
+[╭╴](fg:8)$shell$directory$git_branch$git_status$jobs$cmd_duration$status
+[╰─](fg:8)$character"""
+
+[shell]
+disabled = false
+bash_indicator = "\uf489 bash "
+format = "[$indicator]($style)"
+style = "bold fg:243"
+
+[directory]
+format = "[\uf07b ](fg:4)[$path]($style)[$read_only]($read_only_style) "
+style = "bold fg:4"
+read_only = " \uf023"
+read_only_style = "fg:244"
+truncation_length = 3
+truncation_symbol = "…/"
+home_symbol = "~"
+
+[git_branch]
+symbol = "\ue0a0"
+truncation_length = 20
+truncation_symbol = "…"
+format = "[ $symbol $branch ](fg:6)"
+
+[git_status]
+format = "[($all_status$ahead_behind )](fg:251)"
+conflicted = "="
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕"
+untracked = "?${count}"
+stashed = "$"
+modified = "!${count}"
+staged = "+${count}"
+renamed = "»"
+deleted = "✘${count}"
+
+[jobs]
+symbol = "◆"
+number_threshold = 1
+format = "[$symbol$number ](fg:243)"
+
+[cmd_duration]
+min_time = 2000
+format = "[\uf252 $duration ](fg:8)"
+
+[status]
+disabled = false
+format = "[✘ $status ](bold fg:244)"
+
+[character]
+success_symbol = "[❯](bold fg:243)"
+error_symbol = "[❯](bold fg:244)"
+
+[package]
+disabled = true
