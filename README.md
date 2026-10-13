@@ -31,7 +31,7 @@ Requires `stow`. Some apps (ii saving `config.json`, KDE apps saving `*rc` files
 
 ## Dolphin quick preview
 
-`dolphin/.local/share/kio/servicemenus/space-preview.desktop` adds a "Quick Preview" action that runs `~/.local/bin/fast-preview.sh`. It toggles an imv window: PDFs render page one with `pdftoppm`, Office files use their embedded thumbnail via `unzip`, images open directly, then it falls back to Dolphin's thumbnail cache and finally sushi. Needs imv, poppler, unzip, python3, sushi. Unzip integration for Dolphin is not set up yet (Ark is not installed); this section will change.
+`dolphin/.local/share/kio/servicemenus/space-preview.desktop` adds a "Quick Preview" action that runs `~/.local/bin/fast-preview.sh`. It toggles an imv window: PDFs render page one with `pdftoppm`, Office files use their embedded thumbnail via `unzip`, images open directly, then it falls back to Dolphin's thumbnail cache and finally sushi. Needs imv, poppler, unzip, python3, sushi. Extracting and compressing in Dolphin comes from Ark (right-click, Extract / Compress); it is listed in `packages/pacman-native.txt`.
 
 ## LocalSend
 
