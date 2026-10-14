@@ -16,6 +16,6 @@ application/vnd.openxmlformats-officedocument.presentationml.presentation=deckcr
 application/vnd.ms-powerpoint=deckcraft.desktop
 application/vnd.oasis.opendocument.presentation=deckcraft.desktop
 inode/directory=org.kde.dolphin.desktop
-application/pdf=vivaldi-stable.desktop
+application/pdf=ai.storyteller.pdfcraft.desktop
 
 [Added Associations]
