@@ -15,5 +15,6 @@ application/vnd.oasis.opendocument.spreadsheet=gridcraft.desktop
 application/vnd.openxmlformats-officedocument.presentationml.presentation=deckcraft.desktop
 application/vnd.ms-powerpoint=deckcraft.desktop
 application/vnd.oasis.opendocument.presentation=deckcraft.desktop
+inode/directory=org.kde.dolphin.desktop
 
 [Added Associations]
