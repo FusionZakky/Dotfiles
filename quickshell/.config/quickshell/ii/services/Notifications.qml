@@ -237,6 +237,28 @@ Singleton {
     }
 
     function attemptInvokeAction(id, notifIdentifier) {
+        const item = root.list.find((notif) => notif.notificationId === id);
+        if (item?.appName === "Vivaldi" &&
+            item?.summary === "Download Complete" &&
+            notifIdentifier === "default") {
+            const lines = (item.body ?? "").split("\n")
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0);
+            const filename = lines.length > 1 ? lines[lines.length - 1] : "";
+            if (filename && filename !== "." && filename !== ".." &&
+                !filename.includes("/") && !filename.includes("\\")) {
+                Quickshell.execDetached([
+                    "bash", "-c",
+                    'file="$(xdg-user-dir DOWNLOAD)/$1"; if [ -f "$file" ]; then exec /opt/vivaldi/vivaldi-bin "$file"; else echo "Downloaded file not found: $file" >&2; fi',
+                    "quickshell-open-download", filename
+                ]);
+            } else {
+                console.warn("[Notifications] Could not determine a safe download filename.");
+            }
+            root.discardNotification(id);
+            return;
+        }
+
         console.log("[Notifications] Attempting to invoke action with identifier: " + notifIdentifier + " for notification ID: " + id);
         const notifServerIndex = notifServer.trackedNotifications.values.findIndex((notif) => notif.id + root.idOffset === id);
         console.log("Notification server index: " + notifServerIndex);

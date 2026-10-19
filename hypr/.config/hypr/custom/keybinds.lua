@@ -159,3 +159,7 @@ hl.bind("SUPER + SHIFT + ALT + H", function()
     w.size = { 800, 600 }
 end, { description = "Geometry test: write" })
 
+
+-- Force-close the SDDM test window instantly (SUPER+Q waits for the greeter to shut down politely)
+hl.bind("SUPER + SHIFT + Q", hl.dsp.exec_cmd("pkill -9 -f '[s]ddm-greeter-qt6 --test-mode'"),
+    { description = "Window: Force-close sddm test window" })

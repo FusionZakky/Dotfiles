@@ -31,6 +31,8 @@ Singleton {
     property bool wallpaperSelectorOpen: false
     property bool packageInstallerOpen: false
     property bool wallpaperPickerOpen: false
+    property var wallpaperPickerResume: null
+    property bool hyprglassAuto: false
     property bool workspaceShowNumbers: false
 
     // Shared sizing fractions for custom sliding panels (installer, wallpaper picker,

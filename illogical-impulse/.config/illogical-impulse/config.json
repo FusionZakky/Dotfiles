@@ -80,7 +80,7 @@
       "workspaceZoom": 1.07
     },
     "thumbnailPath": "",
-    "wallpaperPath": "/home/zakkaria/Pictures/Wallpapers/wallhaven-28dro6.jpg",
+    "wallpaperPath": "/home/zakkaria/Pictures/Wallpapers/wallhaven-mlwqdy_1920x1080.png",
     "widgets": {
       "clock": {
         "cookie": {
@@ -419,6 +419,12 @@
       "visualize": false
     },
     "keepRightSidebarLoaded": true,
+    "localsend": {
+      "enable": true
+    },
+    "notes": {
+      "enable": true
+    },
     "quickSliders": {
       "enable": false,
       "showBrightness": true,

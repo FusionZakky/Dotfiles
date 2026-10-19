@@ -1,8 +1,11 @@
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
+import QtMultimedia
 import Quickshell.Io
+import qs
 import qs.services
 import qs.modules.common
 import qs.modules.common.widgets
@@ -28,6 +31,17 @@ Rectangle {
     property string previewCacheDir: FileUtils.trimFileProtocol(Directories.booruPreviews)
 
     property int searchGeneration: 0
+    // Wheel scrolling speed, shared by every grid in this panel (Library, Search and SDDM).
+    // Change these two numbers and all tabs follow.
+    property real wheelMouseStep: 600
+    property real wheelTouchpadStep: 400
+
+    // SDDM detail screen state
+    property var sddmDetail: null
+    property string sddmBusy: ""
+    property string sddmActiveName: ""
+    property string sddmActivePath: ""
+    readonly property bool sddmVideoSupported: true
     // --- Wallhaven browsing: replicates the website's main tabs ---
     property string wallhavenMode: "latest" // "search" | "latest" | "toplist" | "favorites" | "views" | "random"
     property string wallhavenSort: "relevance" // sort order used inside "search" mode
@@ -173,6 +187,8 @@ Rectangle {
         stateLoadProc.running = true
         keysLoadProc.running = true
         monitorProc.running = true
+        const rs = GlobalStates.wallpaperPickerResume
+        if (rs && rs.tab === 2) { root.currentTab = 2; root.ensureSddmScan() }
     }
 
     function mapUnsplash(response) {
@@ -634,6 +650,426 @@ fi${fitCmd}${applyCmd}
         Quickshell.execDetached(["bash", "-c", script])
     }
 
+    // ---------------- Glass tab: live HyprGlass tuning (backend: scripts/hyprglass_ctl.py) ----------------
+    property string gRgb: "#350015"
+    property real gAlpha: 40
+    property real gOpacity: 80
+    property real gBlur: 1.5
+    property real gBrightness: 82
+    property real gHue: 0.94
+    property real gSat: 1
+    property real gVal: 0.33
+    property bool gAuto: false
+    property bool gPlugin: false
+    property bool gLoaded: false
+    property bool gDragging: false
+    property bool gDirty: false
+    property string gStatus: ""
+    property string gWallpaper: ""
+    property var gPresets: []
+    property var gPalette: []
+    readonly property string glassCtl: Quickshell.env("HOME") + "/.config/quickshell/ii/scripts/hyprglass_ctl.py"
+
+    function glassHex2(v) {
+        const s = Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16)
+        return s.length < 2 ? "0" + s : s
+    }
+    function glassRgbHex(c) { return ("#" + root.glassHex2(c.r) + root.glassHex2(c.g) + root.glassHex2(c.b)).toUpperCase() }
+    function glassSetRgb(hex) {
+        try {
+            const c = Qt.color(hex)
+            root.gRgb = root.glassRgbHex(c)
+            if (c.hsvHue >= 0) root.gHue = c.hsvHue
+            root.gSat = c.hsvSaturation
+            root.gVal = c.hsvValue
+        } catch (e) { console.log("[WallpaperPicker] bad glass colour:", hex) }
+    }
+    function glassSetHsv(h, s, v) {
+        root.gHue = h; root.gSat = s; root.gVal = v
+        root.gRgb = root.glassRgbHex(Qt.hsva(h, s, v, 1))
+        root.glassQueueApply()
+    }
+    function glassCurrent() {
+        return { rgb: root.gRgb, alpha: Math.round(root.gAlpha), opacity: Math.round(root.gOpacity), blur: Math.round(root.gBlur * 10) / 10, brightness: Math.round(root.gBrightness) }
+    }
+    function glassUse(s) {
+        root.glassSetRgb(s.rgb); root.gAlpha = s.alpha; root.gOpacity = s.opacity; root.gBlur = s.blur; root.gBrightness = s.brightness
+    }
+    function glassApplySettings(s) { root.glassUse(s); root.glassQueueApply() }
+    function glassReset() { root.glassApplySettings({ rgb: "#350015", alpha: 40, opacity: 80, blur: 1.5, brightness: 82 }) }
+    function glassHexEntered(t) {
+        let v = String(t).trim()
+        if (!v.startsWith("#")) v = "#" + v
+        if (/^#[0-9a-fA-F]{6}$/.test(v)) { root.glassSetRgb(v); root.glassQueueApply() }
+        else root.gStatus = Translation.tr("Enter a six-digit hex colour, for example #350015")
+    }
+    function glassQueueApply() { glassApplyTimer.restart() }
+
+    Timer { id: glassApplyTimer; interval: 160; onTriggered: root.glassApplyNow() }
+    Timer { interval: 3000; repeat: true; running: root.currentTab === 3 && root.gAuto && !root.gDragging; onTriggered: root.glassRefresh() }
+
+    Process {
+        id: glassApplyProc
+        stdout: StdioCollector { onStreamFinished: root.glassOnReply(text) }
+        onExited: (exitCode, exitStatus) => { if (root.gDirty) { root.gDirty = false; Qt.callLater(root.glassApplyNow) } }
+    }
+    function glassApplyNow() {
+        if (glassApplyProc.running) { root.gDirty = true; return }
+        glassApplyProc.command = ["python3", root.glassCtl, "apply", JSON.stringify(root.glassCurrent())]
+        glassApplyProc.running = true
+    }
+    function glassOnReply(raw) {
+        let j = null
+        try { j = JSON.parse(raw.trim()) } catch (e) { return }
+        root.gStatus = j.error ? j.error : (j.message || "")
+    }
+
+    Process {
+        id: glassStateProc
+        stdout: StdioCollector { onStreamFinished: root.glassOnState(text) }
+    }
+    function glassRefresh() {
+        if (glassStateProc.running) return
+        glassStateProc.command = ["python3", root.glassCtl, "state"]
+        glassStateProc.running = true
+    }
+    function glassOnState(raw) {
+        let j = null
+        try { j = JSON.parse(raw.trim()) } catch (e) { root.gStatus = Translation.tr("Could not read the HyprGlass state"); return }
+        if (j.error) { root.gStatus = j.error; return }
+        root.gPlugin = j.plugin === true
+        root.gAuto = j.auto === true
+        root.gWallpaper = String(j.wallpaper || "")
+        root.gPvImages = j.images || []
+        if (root.gWallpaper.length === 0 && root.gPvImages.length > 0 && root.gPvIdx < 0) root.gPvIdx = 0
+        let list = []
+        Object.keys(j.builtins || {}).forEach(n => list.push({ name: n, custom: false, s: j.builtins[n] }))
+        Object.keys(j.custom || {}).forEach(n => list.push({ name: n, custom: true, s: j.custom[n] }))
+        root.gPresets = list
+        const idle = !root.gDragging && !glassApplyTimer.running && !glassApplyProc.running
+        if (!root.gLoaded || idle) root.glassUse(j.settings)
+        root.gLoaded = true
+    }
+
+    Process {
+        id: glassPaletteProc
+        stdout: StdioCollector { onStreamFinished: { try { root.gPalette = JSON.parse(text.trim()).colors || [] } catch (e) {} } }
+    }
+    function glassLoadPalette() {
+        if (glassPaletteProc.running) return
+        glassPaletteProc.command = ["python3", root.glassCtl, "palette"]
+        glassPaletteProc.running = true
+    }
+
+    Process {
+        id: glassLoadProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const j = JSON.parse(text.trim())
+                    root.gPlugin = j.plugin === true
+                    root.gStatus = j.error ? j.error : (j.plugin ? Translation.tr("HyprGlass loaded") : Translation.tr("Could not load HyprGlass: ") + (j.message || ""))
+                } catch (e) {}
+            }
+        }
+    }
+    function glassLoadPlugin() {
+        root.gStatus = Translation.tr("Loading HyprGlass...")
+        glassLoadProc.command = ["python3", root.glassCtl, "load"]
+        glassLoadProc.running = true
+    }
+
+    Process {
+        id: glassWallProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const j = JSON.parse(text.trim())
+                    if (j.rgb) { root.glassSetRgb(j.rgb); root.glassQueueApply() }
+                    root.gStatus = j.message || ""
+                } catch (e) {}
+            }
+        }
+    }
+    function glassMatchWallpaper() {
+        glassWallProc.command = ["python3", root.glassCtl, "wall"]
+        glassWallProc.running = true
+    }
+
+    Process {
+        id: glassAutoProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const j = JSON.parse(text.trim())
+                    if (j.settings) root.glassUse(j.settings)
+                    root.gStatus = j.error ? j.error : (j.message || "")
+                } catch (e) {}
+            }
+        }
+    }
+    function glassSetAuto(on) {
+        root.gAuto = on
+        GlobalStates.hyprglassAuto = on
+        glassAutoProc.command = ["python3", root.glassCtl, "auto", on ? "on" : "off"]
+        glassAutoProc.running = true
+    }
+
+    Process {
+        id: glassPresetProc
+        onExited: (exitCode, exitStatus) => root.glassRefresh()
+    }
+    function glassSavePreset(name) {
+        let n = String(name).trim()
+        if (n.length === 0) {
+            let k = root.gPresets.filter(p => p.custom).length + 1
+            while (root.gPresets.some(p => p.name === "Look " + k)) k++
+            n = "Look " + k
+        }
+        glassPresetProc.command = ["python3", root.glassCtl, "preset-save", n, JSON.stringify(Object.assign({}, root.glassCurrent(), { dynamic: root.gAuto }))]
+        glassPresetProc.running = true
+        root.gStatus = Translation.tr("Saved preset: ") + n
+    }
+    function glassDeletePreset(name) {
+        glassPresetProc.command = ["python3", root.glassCtl, "preset-delete", String(name)]
+        glassPresetProc.running = true
+    }
+    property bool gBusy: false
+    property int gPvIdx: -1
+    property var gPvImages: []
+
+    Process {
+        id: glassEnableProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const j = JSON.parse(text.trim())
+                    if (j.plugin !== undefined) root.gPlugin = j.plugin === true
+                    root.gStatus = j.error ? j.error : (j.message || "")
+                } catch (e) {}
+                root.glassRefresh()
+            }
+        }
+        onExited: (exitCode, exitStatus) => { root.gBusy = false }
+    }
+    function glassSetEnabled(on) {
+        if (root.gBusy) return
+        root.gBusy = true
+        root.gStatus = on ? Translation.tr("Turning HyprGlass on...") : Translation.tr("Turning HyprGlass off...")
+        glassEnableProc.command = ["python3", root.glassCtl, "enable", on ? "on" : "off"]
+        glassEnableProc.running = true
+    }
+    function glassPvPath() {
+        return root.gWallpaper
+    }
+    Process {
+        id: glassUseProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const j = JSON.parse(text.trim())
+                    if (j.settings) root.glassUse(j.settings)
+                    root.gAuto = j.auto === true
+                    GlobalStates.hyprglassAuto = j.auto === true
+                    root.gStatus = j.error ? j.error : (j.message || "")
+                } catch (e) {}
+            }
+        }
+    }
+    function glassUsePreset(s) {
+        if (glassUseProc.running) return
+        glassUseProc.command = ["python3", root.glassCtl, "use", JSON.stringify(s)]
+        glassUseProc.running = true
+    }
+    function ensureGlassState() { root.glassRefresh(); root.glassLoadPalette() }
+
+    // ---------------- SDDM themes tab ----------------
+    property bool sddmScanning: false
+    property bool sddmScanned: false
+
+    function fileUrlOf(p) {
+        if (!p) return ""
+        return "file://" + String(p).split("/").map(encodeURIComponent).join("/")
+    }
+
+    Process {
+        id: sddmScanProc
+        stdout: StdioCollector {
+            onStreamFinished: root.loadSddmThemes(text)
+        }
+        onExited: (exitCode, exitStatus) => { root.sddmScanning = false }
+    }
+
+    function scanSddmThemes() {
+        if (root.sddmScanning) return
+        root.sddmScanning = true
+        sddmScanProc.command = ["bash", "-c", "$HOME/.config/quickshell/ii/scripts/sddm-scan.sh"]
+        sddmScanProc.running = true
+    }
+
+    function ensureSddmScan() {
+        if (root.sddmScanned || root.sddmScanning) return
+        sddmCacheProc.command = ["bash", "-c", "cat \"$HOME/.cache/quickshell/sddm-scan.json\" 2>/dev/null"]
+        sddmCacheProc.running = true
+        root.scanSddmThemes()
+    }
+
+    Process {
+        id: sddmCacheProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (!root.sddmScanned && text.trim().length > 0) root.mergeSddmThemes(text, false)
+            }
+        }
+    }
+
+    function sddmRowFor(t) {
+        return {
+            themeName: String(t.name),
+            themePath: String(t.path),
+            previewUrl: root.fileUrlOf(t.preview),
+            animType: String(t.animType || ""),
+            animPath: String(t.anim || ""),
+            stageA: String(t.stageA || ""),
+            stageB: String(t.stageB || ""),
+            isActive: t.isActive === true,
+            capture1: String(t.capture1 || ""),
+            capture2: String(t.capture2 || ""),
+            captureTried: t.captureTried === true,
+            clip: String(t.clip || ""),
+            dark: t.dark === true,
+            previewSrc: String(t.previewSrc || ""),
+            previewWhy: String(t.previewWhy || "")
+        }
+    }
+
+    // Merge into the live model: update in place, drop vanished themes, insert new ones. Never clear(),
+    // so the scroll position and an open pop-out survive a refresh.
+    function mergeSddmThemes(raw, fromScan) {
+        let themes = []
+        try { themes = JSON.parse(raw.trim() || "[]") } catch (e) { console.log("[WallpaperPicker] SDDM scan parse error:", e); return }
+        const rows = themes.map(t => root.sddmRowFor(t))
+        const wanted = {}
+        rows.forEach(r => { wanted[r.themeName] = true })
+        for (let i = sddmModel.count - 1; i >= 0; i--) {
+            if (!wanted[sddmModel.get(i).themeName]) sddmModel.remove(i)
+        }
+        rows.forEach((r, pos) => {
+            let found = -1
+            for (let i = 0; i < sddmModel.count; i++) {
+                if (sddmModel.get(i).themeName === r.themeName) { found = i; break }
+            }
+            if (found < 0) sddmModel.insert(Math.min(pos, sddmModel.count), r)
+            else sddmModel.set(found, r)
+        })
+        let an = "", ap = ""
+        themes.forEach(t => { if (t.isActive === true) { an = String(t.name); ap = String(t.path) } })
+        root.sddmActiveName = an
+        root.sddmActivePath = ap
+        root.sddmMissingCount = root.sddmMissingPairs().length / 2
+        if (fromScan) root.sddmScanned = true
+        Qt.callLater(root.applySddmResume)
+    }
+
+    function loadSddmThemes(raw) { root.mergeSddmThemes(raw, true) }
+
+    // After Test / capture the panel is reopened by an IPC call; put the user back where they were.
+    function applySddmResume() {
+        const r = GlobalStates.wallpaperPickerResume
+        if (!r || r.tab !== 2 || sddmModel.count === 0) return
+        GlobalStates.wallpaperPickerResume = null
+        sddmGrid.scrollTargetY = r.scrollY || 0
+        sddmGrid.contentY = r.scrollY || 0
+        if (r.detailName) {
+            for (let i = 0; i < sddmModel.count; i++) {
+                if (sddmModel.get(i).themeName === r.detailName) { root.openSddmDetail(i); break }
+            }
+        }
+    }
+
+    // ---------------- SDDM: detail screen, test and apply ----------------
+    function sddmPagesFor(t) {
+        let pages = []
+        if (!t) return pages
+        if (t.animType === "video" && t.animPath && root.sddmVideoSupported)
+            pages.push({ kind: "video", url: root.fileUrlOf(t.animPath), poster: String(t.previewUrl || ""), label: "Animation" })
+        else if (t.animType === "gif" && t.animPath)
+            pages.push({ kind: "gif", url: root.fileUrlOf(t.animPath), label: "Animation" })
+        if (t.clip && !t.animPath) pages.push({ kind: "video", url: root.fileUrlOf(t.clip), poster: String(t.previewUrl || ""), label: "Animation (recorded)" })
+        if (t.stageA) pages.push({ kind: "image", url: root.fileUrlOf(t.stageA), label: "Stage 1" })
+        if (t.stageB) pages.push({ kind: "image", url: root.fileUrlOf(t.stageB), label: "Stage 2" })
+        if (t.capture1) pages.push({ kind: "image", url: root.fileUrlOf(t.capture1), label: "Login screen" })
+        if (t.capture2) pages.push({ kind: "image", url: root.fileUrlOf(t.capture2), label: "After a key press" })
+        if (pages.length === 0 && t.previewUrl) pages.push({ kind: "image", url: String(t.previewUrl), label: "Preview" })
+        return pages
+    }
+
+    function openSddmDetail(idx) {
+        if (idx < 0 || idx >= sddmModel.count) return
+        const t = sddmModel.get(idx)
+        root.sddmDetail = {
+            themeName: String(t.themeName), themePath: String(t.themePath), previewUrl: String(t.previewUrl),
+            animType: String(t.animType), animPath: String(t.animPath),
+            stageA: String(t.stageA), stageB: String(t.stageB), isActive: t.isActive === true,
+            capture1: String(t.capture1), capture2: String(t.capture2),
+            clip: String(t.clip)
+        }
+        sddmPageList.currentIndex = 0
+    }
+
+    function closeSddmDetail() { root.sddmDetail = null }
+
+    property int sddmMissingCount: 0
+
+    // name/path pairs of themes that still have no usable thumbnail (none or black) and no capture yet
+    function sddmMissingPairs() {
+        let out = []
+        for (let i = 0; i < sddmModel.count; i++) {
+            const m = sddmModel.get(i)
+            if ((m.previewUrl === "" || m.dark === true) && m.capture1 === "" && m.captureTried !== true) out.push(String(m.themeName), String(m.themePath))
+        }
+        return out
+    }
+
+    // Saves where the user is, hides the panel, runs the capture script (it reopens the panel when done).
+    function startSddmCapture(pairs) {
+        if (!pairs || pairs.length < 2) return
+        GlobalStates.wallpaperPickerResume = { tab: 2, scrollY: sddmGrid.contentY, detailName: root.sddmDetail ? String(root.sddmDetail.themeName) : "" }
+        Quickshell.execDetached(["bash", Quickshell.env("HOME") + "/.config/quickshell/ii/scripts/sddm-capture.sh"].concat(pairs))
+        GlobalStates.wallpaperPickerOpen = false
+    }
+
+    function testSddmTheme(path) {
+        if (!path) return
+        GlobalStates.wallpaperPickerResume = { tab: 2, scrollY: sddmGrid.contentY, detailName: root.sddmDetail ? String(root.sddmDetail.themeName) : "" }
+        Quickshell.execDetached(["bash", Quickshell.env("HOME") + "/.config/quickshell/ii/scripts/sddm-test.sh", path])
+        GlobalStates.wallpaperPickerOpen = false   // get the panel out of the way; sddm-test.sh reopens it when the test window closes
+    }
+
+    Process {
+        id: sddmApplyProc
+        property string themeName: ""
+        onExited: (exitCode, exitStatus) => {
+            root.sddmBusy = ""
+            if (exitCode === 0) {
+                Quickshell.execDetached(["notify-send", "SDDM", "Login theme set to " + sddmApplyProc.themeName + " (shown at the next login screen)", "-a", "Shell"])
+                root.closeSddmDetail()
+                root.scanSddmThemes()
+            } else {
+                Quickshell.execDetached(["notify-send", "-u", "critical", "SDDM", "Could not set " + sddmApplyProc.themeName + " (cancelled or failed, exit " + exitCode + " - see /tmp/sddm-picker-apply.log)", "-a", "Shell"])
+            }
+        }
+    }
+
+    function applySddmTheme() {
+        const t = root.sddmDetail
+        if (!t) return
+        // runs detached: the password dialog takes focus and closes this panel, and a child of the panel would die with it
+        GlobalStates.wallpaperPickerResume = { tab: 2, scrollY: sddmGrid.contentY, detailName: String(t.themeName) }
+        Quickshell.execDetached(["bash", "-c", 'echo "$(date) apply start: $2 $3" > /tmp/sddm-picker-apply.log; pkexec /usr/bin/bash "$1" "$2" "$3" >> /tmp/sddm-picker-apply.log 2>&1; rc=$?; echo "exit=$rc" >> /tmp/sddm-picker-apply.log; if [ $rc -eq 0 ]; then notify-send -a Shell SDDM "Login theme set to $2"; else notify-send -u critical -a Shell SDDM "Could not set $2 (exit $rc, see /tmp/sddm-picker-apply.log)"; fi; if [ $rc -eq 0 ]; then bash "$HOME/.config/quickshell/ii/scripts/sddm-scan.sh" >/dev/null 2>&1; fi; qs -c ii ipc call wallpaperPicker open >/dev/null 2>&1; exit $rc', "sddm-apply", Quickshell.env("HOME") + "/.config/quickshell/ii/scripts/sddm-apply.sh", String(t.themeName), String(t.themePath)])
+        GlobalStates.wallpaperPickerOpen = false
+    }
+
     function deleteLibraryImage(path) {
         const manifest = "${XDG_STATE_HOME:-$HOME/.local/state}/quickshell/wallpaper-hashes.txt"
         const escapedPath = StringUtils.shellSingleQuoteEscape(path)
@@ -665,6 +1101,8 @@ fi
             spacing: 8
             RippleButton { buttonText: Translation.tr("Library"); toggled: root.currentTab === 0; onClicked: root.currentTab = 0 }
             RippleButton { buttonText: Translation.tr("Search"); toggled: root.currentTab === 1; onClicked: { root.currentTab = 1; root.ensureInitialBrowse() } }
+            RippleButton { buttonText: Translation.tr("SDDM"); toggled: root.currentTab === 2; onClicked: { root.currentTab = 2; root.ensureSddmScan() } }
+            RippleButton { buttonText: Translation.tr("Glass"); toggled: root.currentTab === 3; onClicked: { root.currentTab = 3; root.ensureGlassState() } }
             Item { Layout.fillWidth: true }
             StyledText {
                 visible: !root.stateLoaded
@@ -681,7 +1119,7 @@ fi
                     : root.providerDescription(root.searchProvider)
             }
             Item { Layout.fillWidth: true }
-            StyledText { id: statusText; color: Appearance.colors.colOnLayer1 }
+            StyledText { id: statusText; visible: root.currentTab !== 2 && root.currentTab !== 3; color: Appearance.colors.colOnLayer1 }
         }
 
         StackLayout {
@@ -789,7 +1227,7 @@ fi
                                     acceptedButtons: Qt.NoButton
                                     onWheel: (wheel) => {
                                         const delta = wheel.angleDelta.y / 120
-                                        const factor = Math.abs(wheel.angleDelta.y) >= 120 ? 600 : 400  // mouse notch : touchpad
+                                        const factor = Math.abs(wheel.angleDelta.y) >= 120 ? root.wheelMouseStep : root.wheelTouchpadStep  // mouse notch : touchpad
                                         const maxY = Math.max(0, libraryGrid.contentHeight - libraryGrid.height)
                                         const base = libraryScrollAnim.running ? libraryGrid.scrollTargetY : libraryGrid.contentY
                                         const targetY = Math.max(0, Math.min(base - delta * factor, maxY))
@@ -1059,7 +1497,7 @@ fi
                             acceptedButtons: Qt.NoButton
                             onWheel: (wheel) => {
                                 const delta = wheel.angleDelta.y / 120
-                                const factor = Math.abs(wheel.angleDelta.y) >= 120 ? 600 : 400  // mouse notch : touchpad
+                                const factor = Math.abs(wheel.angleDelta.y) >= 120 ? root.wheelMouseStep : root.wheelTouchpadStep  // mouse notch : touchpad
                                 const maxY = Math.max(0, resultsGrid.contentHeight - resultsGrid.height)
                                 const base = resultsScrollAnim.running ? resultsGrid.scrollTargetY : resultsGrid.contentY
                                 const targetY = Math.max(0, Math.min(base - delta * factor, maxY))
@@ -1111,9 +1549,803 @@ fi
                     }
                 }
             }
+            // ---- SDDM themes tab ----
+            Item {
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 8
+
+                    RowLayout {
+                        spacing: 8
+                        StyledText {
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                            color: Appearance.colors.colOnLayer2
+                            text: root.sddmScanning ? Translation.tr("Scanning for SDDM themes...") : (Translation.tr("%1 SDDM theme(s) found").arg(sddmModel.count) + (root.sddmActiveName.length > 0 ? "   |   " + Translation.tr("current: %1").arg(root.sddmActiveName) : ""))
+                        }
+                        RippleButton {
+                            visible: root.sddmActivePath.length > 0
+                            buttonText: Translation.tr("Test current")
+                            onClicked: root.testSddmTheme(root.sddmActivePath)
+                        }
+                        RippleButton {
+                            visible: root.sddmMissingCount > 0 && !root.sddmScanning
+                            buttonText: Translation.tr("Capture login screens (%1)").arg(root.sddmMissingCount)
+                            onClicked: root.startSddmCapture(root.sddmMissingPairs())
+                        }
+                        RippleButton {
+                            buttonText: Translation.tr("Rescan")
+                            onClicked: root.scanSddmThemes()
+                        }
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        ListModel { id: sddmModel }
+
+                        GridView {
+                            id: sddmGrid
+                            property real scrollTargetY: 0
+                            Behavior on contentY {
+                                NumberAnimation { id: sddmScrollAnim; duration: 140; easing.type: Easing.OutCubic }
+                            }
+                            onContentYChanged: { if (!sddmScrollAnim.running) scrollTargetY = contentY }
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.NoButton
+                                onWheel: (wheel) => {
+                                    const delta = wheel.angleDelta.y / 120
+                                    const factor = Math.abs(wheel.angleDelta.y) >= 120 ? root.wheelMouseStep : root.wheelTouchpadStep
+                                    const maxY = Math.max(0, sddmGrid.contentHeight - sddmGrid.height)
+                                    const base = sddmScrollAnim.running ? sddmGrid.scrollTargetY : sddmGrid.contentY
+                                    const targetY = Math.max(0, Math.min(base - delta * factor, maxY))
+                                    sddmGrid.scrollTargetY = targetY
+                                    sddmGrid.contentY = targetY
+                                    wheel.accepted = true
+                                }
+                            }
+                            anchors.fill: parent
+                            clip: true
+                            cellWidth: 260
+                            cellHeight: 190
+                            model: sddmModel
+                            delegate: Item {
+                                id: sddmItem
+                                width: sddmGrid.cellWidth
+                                height: sddmGrid.cellHeight
+                                required property string themeName
+                                required property string previewUrl
+                                required property string animType
+                                required property bool isActive
+                                required property int index
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.margins: 4
+                                    radius: Appearance.rounding.small
+                                    color: Appearance.colors.colLayer2
+                                    clip: true
+                                    Image {
+                                        anchors.fill: parent
+                                        anchors.bottomMargin: 30
+                                        visible: sddmItem.previewUrl.length > 0
+                                        source: sddmItem.previewUrl
+                                        fillMode: Image.PreserveAspectCrop
+                                        asynchronous: true
+                                    }
+                                    MaterialSymbol {
+                                        anchors.centerIn: parent
+                                        anchors.verticalCenterOffset: -15
+                                        visible: sddmItem.previewUrl.length === 0
+                                        iconSize: 40
+                                        color: Appearance.m3colors.m3onSurface
+                                        text: "image"
+                                    }
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                        height: 30
+                                        color: ColorUtils.transparentize(Appearance.m3colors.m3surface, 0.15)
+                                        StyledText {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 10
+                                            anchors.rightMargin: 10
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                            color: Appearance.m3colors.m3onSurface
+                                            text: sddmItem.themeName
+                                        }
+                                    }
+                                    Rectangle {
+                                        visible: sddmItem.animType.length > 0
+                                        anchors.top: parent.top
+                                        anchors.left: parent.left
+                                        anchors.margins: 8
+                                        height: 22
+                                        width: animLabel.implicitWidth + 16
+                                        radius: height / 2
+                                        color: ColorUtils.transparentize(Appearance.m3colors.m3surface, 0.2)
+                                        border.width: 1
+                                        border.color: Appearance.colors.colPrimary
+                                        StyledText {
+                                            id: animLabel
+                                            anchors.centerIn: parent
+                                            color: Appearance.colors.colPrimary
+                                            font.pixelSize: Appearance.font.pixelSize.smaller
+                                            font.bold: true
+                                            text: sddmItem.animType === "video" ? Translation.tr("VIDEO") : (sddmItem.animType === "gif" ? Translation.tr("GIF") : Translation.tr("ANIMATED"))
+                                        }
+                                    }
+                                    Rectangle {
+                                        visible: sddmItem.isActive
+                                        anchors.top: parent.top
+                                        anchors.right: parent.right
+                                        anchors.margins: 8
+                                        height: 22
+                                        width: activeLabel.implicitWidth + 16
+                                        radius: height / 2
+                                        color: Appearance.colors.colPrimary
+                                        StyledText {
+                                            id: activeLabel
+                                            anchors.centerIn: parent
+                                            color: Appearance.colors.colOnPrimary
+                                            font.pixelSize: Appearance.font.pixelSize.smaller
+                                            font.bold: true
+                                            text: Translation.tr("ACTIVE")
+                                        }
+                                    }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.openSddmDetail(sddmItem.index)
+                                }
+                            }
+                        }
+
+                        StyledText {
+                            anchors.centerIn: parent
+                            visible: root.sddmScanned && !root.sddmScanning && sddmModel.count === 0
+                            color: Appearance.colors.colOnLayer2
+                            text: Translation.tr("No SDDM themes found")
+                        }
+                    }
+                }
+            }
+            Item {
+                id: glassTab
+
+                RowLayout {
+                    anchors.fill: parent
+                    spacing: 16
+
+                    ColumnLayout {
+                        Layout.preferredWidth: 440
+                        Layout.maximumWidth: 440
+                        Layout.alignment: Qt.AlignTop
+                        spacing: 10
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 42
+                            radius: Appearance.rounding.small
+                            color: root.gPlugin ? Appearance.colors.colLayer2 : Appearance.colors.colSecondaryContainer
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 6
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    color: root.gPlugin ? Appearance.colors.colOnLayer2 : Appearance.colors.colOnSecondaryContainer
+                                    text: root.gPlugin ? Translation.tr("HyprGlass is on: foot and kitty update as you adjust") : Translation.tr("HyprGlass is off")
+                                }
+                                RippleButton {
+                                    enabled: !root.gBusy
+                                    buttonText: root.gPlugin ? Translation.tr("Turn off") : Translation.tr("Turn on")
+                                    toggled: root.gPlugin
+                                    onClicked: root.glassSetEnabled(!root.gPlugin)
+                                }
+                            }
+                        }
+
+                        StyledText { text: Translation.tr("Tint colour"); font.bold: true; color: Appearance.colors.colOnLayer2 }
+                        RowLayout {
+                            spacing: 12
+                            Rectangle {
+                                id: glSv
+                                Layout.preferredWidth: 230
+                                Layout.preferredHeight: 150
+                                radius: 10
+                                color: Qt.hsva(root.gHue, 1, 1, 1)
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    gradient: Gradient {
+                                        orientation: Gradient.Horizontal
+                                        GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 1) }
+                                        GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0) }
+                                    }
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0) }
+                                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 1) }
+                                    }
+                                }
+                                Rectangle {
+                                    width: 16; height: 16; radius: 8
+                                    color: root.gRgb
+                                    border.width: 2
+                                    border.color: "white"
+                                    x: root.gSat * glSv.width - 8
+                                    y: (1 - root.gVal) * glSv.height - 8
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    function pick(m) {
+                                        root.glassSetHsv(root.gHue, Math.max(0, Math.min(1, m.x / width)), 1 - Math.max(0, Math.min(1, m.y / height)))
+                                    }
+                                    onPressed: (m) => { root.gDragging = true; pick(m) }
+                                    onPositionChanged: (m) => { if (pressed) pick(m) }
+                                    onReleased: root.gDragging = false
+                                    onCanceled: root.gDragging = false
+                                }
+                            }
+                            Rectangle {
+                                id: glHue
+                                Layout.preferredWidth: 22
+                                Layout.preferredHeight: 150
+                                radius: 8
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#FF0000" }
+                                    GradientStop { position: 0.1667; color: "#FFFF00" }
+                                    GradientStop { position: 0.3333; color: "#00FF00" }
+                                    GradientStop { position: 0.5; color: "#00FFFF" }
+                                    GradientStop { position: 0.6667; color: "#0000FF" }
+                                    GradientStop { position: 0.8333; color: "#FF00FF" }
+                                    GradientStop { position: 1.0; color: "#FF0000" }
+                                }
+                                Rectangle {
+                                    x: -2
+                                    y: root.gHue * glHue.height - 3
+                                    width: parent.width + 4; height: 6; radius: 3
+                                    color: "transparent"
+                                    border.width: 2
+                                    border.color: "white"
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    function pick(m) { root.glassSetHsv(Math.max(0, Math.min(1, m.y / height)), root.gSat, root.gVal) }
+                                    onPressed: (m) => { root.gDragging = true; pick(m) }
+                                    onPositionChanged: (m) => { if (pressed) pick(m) }
+                                    onReleased: root.gDragging = false
+                                    onCanceled: root.gDragging = false
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.alignment: Qt.AlignTop
+                                spacing: 8
+                                Rectangle {
+                                    Layout.preferredWidth: 100
+                                    Layout.preferredHeight: 32
+                                    radius: Appearance.rounding.small
+                                    color: Appearance.colors.colSecondaryContainer
+                                    MouseArea { anchors.fill: parent; cursorShape: Qt.IBeamCursor; onClicked: glHex.forceActiveFocus() }
+                                    TextInput {
+                                        id: glHex
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        verticalAlignment: TextInput.AlignVCenter
+                                        maximumLength: 7
+                                        selectByMouse: true
+                                        color: Appearance.colors.colOnSecondaryContainer
+                                        font.family: Appearance.font.family.main
+                                        font.pixelSize: Appearance.font.pixelSize.small
+                                        Component.onCompleted: text = root.gRgb
+                                        onEditingFinished: root.glassHexEntered(text)
+                                        Connections {
+                                            target: root
+                                            function onGRgbChanged() { if (!glHex.activeFocus) glHex.text = root.gRgb }
+                                        }
+                                    }
+                                }
+                                StyledText { text: Translation.tr("From your wallpaper"); font.pixelSize: Appearance.font.pixelSize.smaller; color: Appearance.colors.colOnLayer2 }
+                                Flow {
+                                    Layout.preferredWidth: 100
+                                    spacing: 6
+                                    Repeater {
+                                        model: root.gPalette
+                                        delegate: Rectangle {
+                                            id: glSwatch
+                                            required property var modelData
+                                            width: 28; height: 28; radius: 14
+                                            color: glSwatch.modelData
+                                            border.width: 1
+                                            border.color: Qt.rgba(1, 1, 1, 0.3)
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: { root.glassSetRgb(glSwatch.modelData); root.glassQueueApply() }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        StyledText { text: Translation.tr("Glass"); font.bold: true; color: Appearance.colors.colOnLayer2 }
+                        Repeater {
+                            model: [
+                                { prop: "gAlpha", label: "Tint strength", from: 0, to: 100, dec: 0, unit: "%" },
+                                { prop: "gOpacity", label: "Glass opacity", from: 40, to: 100, dec: 0, unit: "%" },
+                                { prop: "gBlur", label: "Blur", from: 0, to: 5, dec: 1, unit: "" },
+                                { prop: "gBrightness", label: "Brightness", from: 50, to: 100, dec: 0, unit: "%" }
+                            ]
+                            delegate: RowLayout {
+                                id: glRow
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: 10
+                                StyledText { Layout.preferredWidth: 100; color: Appearance.colors.colOnLayer2; text: Translation.tr(glRow.modelData.label) }
+                                StyledSlider {
+                                    Layout.fillWidth: true
+                                    configuration: StyledSlider.Configuration.XS
+                                    stopIndicatorValues: []
+                                    usePercentTooltip: false
+                                    from: glRow.modelData.from
+                                    to: glRow.modelData.to
+                                    value: root[glRow.modelData.prop]
+                                    onMoved: { root[glRow.modelData.prop] = value; root.glassQueueApply() }
+                                    onPressedChanged: root.gDragging = pressed
+                                }
+                                StyledText {
+                                    Layout.preferredWidth: 52
+                                    horizontalAlignment: Text.AlignRight
+                                    color: Appearance.colors.colOnLayer2
+                                    text: Number(root[glRow.modelData.prop]).toFixed(glRow.modelData.dec) + glRow.modelData.unit
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            spacing: 8
+                            RippleButton { buttonText: Translation.tr("Match wallpaper"); onClicked: root.glassMatchWallpaper() }
+                            RippleButton { buttonText: root.gAuto ? Translation.tr("Auto: on") : Translation.tr("Auto: off"); toggled: root.gAuto; onClicked: root.glassSetAuto(!root.gAuto) }
+                            RippleButton { buttonText: Translation.tr("Reset to favourite"); onClicked: root.glassReset() }
+                        }
+                        Item { Layout.fillHeight: true }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.alignment: Qt.AlignTop
+                        spacing: 10
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            StyledText {
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                font.bold: true
+                                color: Appearance.colors.colOnLayer2
+                                text: Translation.tr("Live preview") + (root.glassPvPath().length > 0 ? "   |   " + root.glassPvPath().split("/").pop() : "")
+                            }
+                            
+                            
+                        }
+                        Item {
+                            id: glPvMask
+                            visible: false
+                            width: glPv.width
+                            height: glPv.height
+                            layer.enabled: true
+                            Rectangle { anchors.fill: parent; radius: 14 }
+                        }
+                        Item {
+                            id: glPv
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 330
+                            layer.enabled: true
+                            layer.effect: MultiEffect { maskEnabled: true; maskSource: glPvMask }
+
+                            Rectangle { anchors.fill: parent; color: "#101018" }
+                            Image {
+                                id: glPvImg
+                                anchors.fill: parent
+                                source: root.glassPvPath().length > 0 ? root.fileUrlOf(root.glassPvPath()) : ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                            }
+                            Item {
+                                id: glPane
+                                x: glPv.width * 0.08
+                                y: glPv.height * 0.14
+                                width: glPv.width * 0.66
+                                height: glPv.height * 0.68
+                                property color tint: Qt.color(root.gRgb)
+                                ShaderEffectSource {
+                                    id: glPaneSrc
+                                    anchors.fill: parent
+                                    sourceItem: glPvImg
+                                    sourceRect: Qt.rect(glPane.x, glPane.y, glPane.width, glPane.height)
+                                    visible: false
+                                }
+                                Item {
+                                    id: glPaneMask
+                                    anchors.fill: parent
+                                    visible: false
+                                    layer.enabled: true
+                                    Rectangle { anchors.fill: parent; radius: 12 }
+                                }
+                                MultiEffect {
+                                    anchors.fill: parent
+                                    source: glPaneSrc
+                                    blurEnabled: true
+                                    blurMax: 64
+                                    autoPaddingEnabled: false
+                                    blur: Math.min(1, root.gBlur / 5)
+                                    brightness: (root.gBrightness - 100) / 80
+                                    maskEnabled: true
+                                    maskSource: glPaneMask
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 12
+                                    color: Qt.rgba(glPane.tint.r, glPane.tint.g, glPane.tint.b, (root.gAlpha / 100) * (root.gOpacity / 100))
+                                    border.width: 1
+                                    border.color: Qt.rgba(1, 1, 1, 0.18)
+                                }
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 4
+                                    StyledText { color: "white"; font.family: "monospace"; font.pixelSize: 13; textFormat: Text.RichText
+                                        text: "<span style='color:#8bd5a0'>zakkaria@archlinux</span> <span style='color:#8aadf4'>~</span> ❯ ls --color" }
+                                    StyledText { color: "white"; font.family: "monospace"; font.pixelSize: 13; textFormat: Text.RichText
+                                        text: "<span style='color:#8aadf4'>Documents</span>  <span style='color:#8aadf4'>Downloads</span>  <span style='color:#f5a97f'>notes.md</span>  <span style='color:#a6da95'>build.sh</span>" }
+                                    StyledText { color: "white"; font.family: "monospace"; font.pixelSize: 13; textFormat: Text.RichText
+                                        text: "<span style='color:#8bd5a0'>zakkaria@archlinux</span> <span style='color:#8aadf4'>~</span> ❯ echo glass" }
+                                    StyledText { color: "white"; font.family: "monospace"; font.pixelSize: 13; text: "glass" }
+                                    Item { Layout.fillHeight: true }
+                                }
+                            }
+                        }
+                        StyledText {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            font.pixelSize: Appearance.font.pixelSize.smaller
+                            color: Appearance.colors.colOnLayer2
+                            opacity: 0.8
+                            text: Translation.tr("The preview approximates the effect. Open foot and kitty windows show the real thing while HyprGlass is on.")
+                        }
+
+                        StyledText { text: Translation.tr("Presets"); font.bold: true; color: Appearance.colors.colOnLayer2 }
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Repeater {
+                                model: root.gPresets
+                                delegate: Rectangle {
+                                    id: glChip
+                                    required property var modelData
+                                    height: 32
+                                    width: glChipRow.implicitWidth + 22
+                                    radius: 16
+                                    color: glChipMa.containsMouse ? Appearance.colors.colPrimary : Appearance.colors.colSecondaryContainer
+                                    MouseArea {
+                                        id: glChipMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.glassUsePreset(glChip.modelData.s)
+                                    }
+                                    RowLayout {
+                                        id: glChipRow
+                                        anchors.centerIn: parent
+                                        spacing: 8
+                                        Rectangle { width: 14; height: 14; radius: 7; color: glChip.modelData.s.rgb; border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.35) }
+                                        MaterialSymbol {
+                                            visible: glChip.modelData.s.dynamic === true
+                                            iconSize: 16
+                                            color: glChipMa.containsMouse ? Appearance.colors.colOnPrimary : Appearance.colors.colOnSecondaryContainer
+                                            text: "auto_awesome"
+                                        }
+                                        StyledText {
+                                            color: glChipMa.containsMouse ? Appearance.colors.colOnPrimary : Appearance.colors.colOnSecondaryContainer
+                                            text: glChip.modelData.name
+                                        }
+                                        MaterialSymbol {
+                                            visible: glChip.modelData.custom
+                                            iconSize: 16
+                                            color: glChipMa.containsMouse ? Appearance.colors.colOnPrimary : Appearance.colors.colOnSecondaryContainer
+                                            text: "close"
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.glassDeletePreset(glChip.modelData.name)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        RowLayout {
+                            spacing: 8
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 34
+                                radius: Appearance.rounding.small
+                                color: Appearance.colors.colSecondaryContainer
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.IBeamCursor; onClicked: glName.forceActiveFocus() }
+                                TextInput {
+                                    id: glName
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    maximumLength: 48
+                                    selectByMouse: true
+                                    color: Appearance.colors.colOnSecondaryContainer
+                                    font.family: Appearance.font.family.main
+                                    font.pixelSize: Appearance.font.pixelSize.small
+                                    onAccepted: { root.glassSavePreset(text); text = "" }
+                                }
+                                StyledText {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 10
+                                    visible: glName.text.length === 0
+                                    color: Appearance.colors.colOnSecondaryContainer
+                                    opacity: 0.5
+                                    text: Translation.tr("Name (optional). Saved with dynamic colours while Auto is on")
+                                }
+                            }
+                            RippleButton { buttonText: Translation.tr("Save preset"); onClicked: { root.glassSavePreset(glName.text); glName.text = "" } }
+                        }
+                        StyledText {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            font.pixelSize: Appearance.font.pixelSize.smaller
+                            color: Appearance.colors.colOnLayer2
+                            opacity: 0.8
+                            text: root.gStatus
+                        }
+                        Item { Layout.fillHeight: true }
+                    }
+                }
+            }
         }
     }
 
+    // ---- SDDM theme pop-out: preview / animation / stages, plus Test and Set ----
+    Rectangle {
+        id: sddmOverlay
+        anchors.fill: parent
+        visible: root.sddmDetail !== null
+        color: "#ee000000"
+        radius: Appearance.rounding.normal
+        z: 1000
+
+        readonly property var pages: root.sddmPagesFor(root.sddmDetail)
+
+        onVisibleChanged: { if (visible) forceActiveFocus() }
+        Keys.onEscapePressed: root.closeSddmDetail()
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: root.closeSddmDetail()
+            onWheel: (wheel) => { wheel.accepted = true }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 24
+            spacing: 12
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                StyledText {
+                    text: root.sddmDetail ? root.sddmDetail.themeName : ""
+                    font.bold: true
+                    font.pixelSize: Appearance.font.pixelSize.large
+                    color: "white"
+                }
+                Repeater {
+                    model: {
+                        let b = []
+                        const d = root.sddmDetail
+                        if (d) {
+                            if (d.isActive) b.push("ACTIVE")
+                            if (d.animType === "video") b.push("VIDEO")
+                            else if (d.animType === "gif") b.push("GIF")
+                            else if (d.animType === "qml") b.push("ANIMATED")
+                            if (d.stageA && d.stageB) b.push("2 STAGES")
+                        }
+                        return b
+                    }
+                    delegate: Rectangle {
+                        required property string modelData
+                        implicitHeight: 24
+                        implicitWidth: badgeLabel.implicitWidth + 18
+                        radius: height / 2
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Appearance.colors.colPrimary
+                        StyledText {
+                            id: badgeLabel
+                            anchors.centerIn: parent
+                            color: Appearance.colors.colPrimary
+                            font.pixelSize: Appearance.font.pixelSize.smaller
+                            font.bold: true
+                            text: parent.modelData
+                        }
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                RippleButton {
+                    buttonText: Translation.tr("Close")
+                    onClicked: root.closeSddmDetail()
+                }
+            }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                ListView {
+                    id: sddmPageList
+                    anchors.fill: parent
+                    orientation: ListView.Horizontal
+                    snapMode: ListView.SnapOneItem
+                    highlightRangeMode: ListView.StrictlyEnforceRange
+                    highlightMoveDuration: 250
+                    boundsBehavior: Flickable.StopAtBounds
+                    clip: true
+                    interactive: count > 1
+                    model: sddmOverlay.pages
+                    delegate: Item {
+                        id: pageItem
+                        required property var modelData
+                        required property int index
+                        width: sddmPageList.width
+                        height: sddmPageList.height
+                        readonly property bool isCurrent: ListView.isCurrentItem
+
+                        Image {
+                            anchors.fill: parent
+                            visible: pageItem.modelData.kind === "image"
+                            source: pageItem.modelData.kind === "image" ? pageItem.modelData.url : ""
+                            fillMode: Image.PreserveAspectFit
+                            asynchronous: true
+                        }
+                        AnimatedImage {
+                            anchors.fill: parent
+                            visible: pageItem.modelData.kind === "gif"
+                            source: (pageItem.modelData.kind === "gif" && pageItem.isCurrent) ? pageItem.modelData.url : ""
+                            fillMode: Image.PreserveAspectFit
+                            asynchronous: true
+                            playing: visible
+                        }
+                        Image {
+                            anchors.fill: parent
+                            visible: pageItem.modelData.kind === "video" && videoPlayer.playbackState !== MediaPlayer.PlayingState
+                            source: pageItem.modelData.kind === "video" ? (pageItem.modelData.poster || "") : ""
+                            fillMode: Image.PreserveAspectFit
+                            asynchronous: true
+                        }
+                        VideoOutput {
+                            id: videoOut
+                            anchors.fill: parent
+                            visible: pageItem.modelData.kind === "video" && videoPlayer.playbackState === MediaPlayer.PlayingState
+                            fillMode: VideoOutput.PreserveAspectFit
+                        }
+                        MediaPlayer {
+                            id: videoPlayer
+                            source: (pageItem.modelData.kind === "video" && pageItem.isCurrent) ? pageItem.modelData.url : ""
+                            videoOutput: videoOut
+                            audioOutput: AudioOutput { muted: true }
+                            loops: MediaPlayer.Infinite
+                            onSourceChanged: { if (source.toString() !== "") play() }
+                            Component.onCompleted: { if (source.toString() !== "") play() }
+                        }
+                    }
+                }
+
+                RippleButton {
+                    visible: sddmPageList.count > 1 && sddmPageList.currentIndex > 0
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    implicitWidth: 40
+                    implicitHeight: 40
+                    buttonRadius: Appearance.rounding.full
+                    colBackground: ColorUtils.transparentize(Appearance.m3colors.m3surface, 0.3)
+                    onClicked: sddmPageList.currentIndex = Math.max(0, sddmPageList.currentIndex - 1)
+                    contentItem: MaterialSymbol { horizontalAlignment: Text.AlignHCenter; iconSize: 24; color: Appearance.m3colors.m3onSurface; text: "chevron_left" }
+                }
+                RippleButton {
+                    visible: sddmPageList.count > 1 && sddmPageList.currentIndex < sddmPageList.count - 1
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    implicitWidth: 40
+                    implicitHeight: 40
+                    buttonRadius: Appearance.rounding.full
+                    colBackground: ColorUtils.transparentize(Appearance.m3colors.m3surface, 0.3)
+                    onClicked: sddmPageList.currentIndex = Math.min(sddmPageList.count - 1, sddmPageList.currentIndex + 1)
+                    contentItem: MaterialSymbol { horizontalAlignment: Text.AlignHCenter; iconSize: 24; color: Appearance.m3colors.m3onSurface; text: "chevron_right" }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    onWheel: (wheel) => {
+                        if (sddmPageList.count > 1) {
+                            const dy = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
+                            const dir = dy < 0 ? 1 : -1
+                            sddmPageList.currentIndex = Math.max(0, Math.min(sddmPageList.count - 1, sddmPageList.currentIndex + dir))
+                        }
+                        wheel.accepted = true
+                    }
+                }
+            }
+
+            StyledText {
+                Layout.alignment: Qt.AlignHCenter
+                visible: sddmOverlay.pages.length > 0
+                color: "white"
+                text: {
+                    const i = sddmPageList.currentIndex
+                    const pg = sddmOverlay.pages[i]
+                    if (!pg) return ""
+                    return sddmOverlay.pages.length > 1 ? (pg.label + "   (" + (i + 1) + " / " + sddmOverlay.pages.length + ")") : pg.label
+                }
+            }
+            StyledText {
+                Layout.alignment: Qt.AlignHCenter
+                visible: sddmOverlay.pages.length === 0
+                color: "white"
+                text: Translation.tr("No preview image was found for this theme. Use Test to see it live.")
+            }
+            StyledText {
+                Layout.alignment: Qt.AlignHCenter
+                visible: !!(root.sddmDetail && root.sddmDetail.animType === "qml" && !root.sddmDetail.clip)
+                color: "white"
+                font.pixelSize: Appearance.font.pixelSize.smaller
+                text: Translation.tr("This theme animates using QML, which can't be previewed here. Use Test to see it live.")
+            }
+            StyledText {
+                Layout.alignment: Qt.AlignHCenter
+                visible: root.sddmBusy !== ""
+                color: "white"
+                text: root.sddmBusy
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 10
+                RippleButton {
+                    buttonText: Translation.tr("Test")
+                    onClicked: root.testSddmTheme(root.sddmDetail ? root.sddmDetail.themePath : "")
+                }
+                RippleButton {
+                    enabled: root.sddmBusy === ""
+                    buttonText: Translation.tr("Capture login screen")
+                    onClicked: { if (root.sddmDetail) root.startSddmCapture([String(root.sddmDetail.themeName), String(root.sddmDetail.themePath)]) }
+                }
+                RippleButton {
+                    enabled: root.sddmBusy === ""
+                    buttonText: (root.sddmDetail && root.sddmDetail.isActive) ? Translation.tr("Re-apply as login theme") : Translation.tr("Set as login theme")
+                    onClicked: root.applySddmTheme()
+                }
+            }
+        }
+    }
     Rectangle {
         id: previewOverlay
         anchors.fill: parent

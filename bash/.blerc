@@ -20,7 +20,42 @@ ble-bind -m emacs -f RET accept-line
 ble-bind -m emacs -f C-m accept-line
 
 # Ctrl+Shift+V: paste straight from the Wayland clipboard (terminal forwards the key to ble.sh)
-function my/wl-paste { local t; t=$(wl-paste -n 2>/dev/null); READLINE_LINE=${READLINE_LINE:0:READLINE_POINT}${t}${READLINE_LINE:READLINE_POINT}; READLINE_POINT=$((READLINE_POINT+${#t})); }
-ble-bind -x 'C-S-v' 'my/wl-paste'
+ble-bind -x 'C-S-v' 'my/wl-paste-big'
 ble-face varname_new='fg=251'
 ble-face filename_executable='fg=4,underline'
+bleopt highlight_timeout_sync=10
+ble-face syntax_document='fg=251'
+ble-face syntax_document_begin='fg=251,bold'
+
+function my/wl-paste-big {
+  local t n
+  t=$(wl-paste -n 2>/dev/null) || return
+  n=$(printf '%s' "$t" | wc -l)
+  if ((n>15)); then printf '%s\n' "$t" > /tmp/bigpaste.sh; t='. /tmp/bigpaste.sh'; fi
+  READLINE_LINE=${READLINE_LINE:0:READLINE_POINT}${t}${READLINE_LINE:READLINE_POINT}
+  READLINE_POINT=$((READLINE_POINT+${#t}))
+}
+# olive-fix: fixed olive fg colours -> slot 251
+ble-face varname_number='fg=251'
+ble-face varname_hash='fg=251,bold'
+# --- fish-colour-logic (generated) ---
+ble-face command_builtin='none'
+ble-face command_alias='none'
+ble-face command_function='none'
+ble-face command_file='none'
+ble-face command_keyword='none'
+ble-face syntax_quoted='fg=3'
+ble-face syntax_quotation='fg=3'
+ble-face syntax_document='fg=3'
+ble-face syntax_document_begin='fg=3'
+ble-face argument_option='fg=6'
+ble-face syntax_default='fg=6'
+ble-face syntax_error='fg=9'
+ble-face argument_error='fg=9'
+ble-face syntax_comment='fg=1'
+ble-face syntax_delimiter='fg=2'
+ble-face syntax_glob='fg=14'
+ble-face syntax_tilde='fg=14'
+ble-face syntax_escape='fg=14'
+ble-face auto_complete='fg=8'
+# --- end fish-colour-logic ---

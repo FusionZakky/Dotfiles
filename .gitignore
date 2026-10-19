@@ -6,3 +6,6 @@ kitty/.config/kitty/colors.conf
 btop/.config/btop/themes/matugen.theme
 micro/.config/micro/backups/
 micro/.config/micro/buffers/
+
+__pycache__/
+*.pyc
