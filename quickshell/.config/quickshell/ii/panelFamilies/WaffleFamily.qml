@@ -24,6 +24,7 @@ import qs.modules.ii.screenTranslator
 import qs.modules.ii.packageInstaller
 import qs.modules.ii.wallpaperSelector
 import qs.modules.ii.wallpaperPicker
+import qs.modules.ii.wallpaperTransition
 
 Scope {
     PanelLoader { component: WaffleActionCenter {} }
@@ -47,4 +48,5 @@ Scope {
     PanelLoader { component: WallpaperSelector {} }
     PanelLoader { component: PackageInstaller {} }
     PanelLoader { component: WallpaperPicker {} }
+    PanelLoader { component: WallpaperTransition {} }
 }

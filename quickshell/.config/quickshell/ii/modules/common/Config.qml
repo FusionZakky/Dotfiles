@@ -162,6 +162,14 @@ Singleton {
             }
 
             property JsonObject background: JsonObject {
+                // Wallpaper reveal transition (modules/ii/wallpaperTransition)
+                property JsonObject transition: JsonObject {
+                    property bool enable: true
+                    property int durationMs: 900   // how long the circle takes to cover the screen
+                    property int featherPx: 90     // softness of the circle's edge
+                    property int settleMs: 450     // wait after the colour script exits, before revealing
+                    property int timeoutMs: 8000   // safety: reveal anyway if the script never reports back
+                }
                 property JsonObject widgets: JsonObject {
                     property JsonObject clock: JsonObject {
                         property bool enable: true

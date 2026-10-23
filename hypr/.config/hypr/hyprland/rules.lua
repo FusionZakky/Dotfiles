@@ -169,3 +169,6 @@ hl.layer_rule({ match = { namespace = "quickshell:wTaskView" }, no_anim = true})
 
 -- Launchers need to be FAST
 hl.layer_rule({ match = { namespace = "gtk4-layer-shell" }, no_anim = true})
+
+-- Wallpaper reveal overlay: no open/close pop animation (modules/ii/wallpaperTransition)
+hl.layer_rule({ match = { namespace = "quickshell:wallpaperTransition" }, no_anim = true})

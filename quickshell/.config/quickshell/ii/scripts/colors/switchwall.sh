@@ -70,8 +70,8 @@ check_and_prompt_upscale() {
             img_width=$min_width_desired
             img_height=$min_height_desired
         else
-            img_width=$(identify -format "%w" "$img" 2>/dev/null)
-            img_height=$(identify -format "%h" "$img" 2>/dev/null)
+            img_width=$(identify -ping -format "%w" "$img" 2>/dev/null)
+            img_height=$(identify -ping -format "%h" "$img" 2>/dev/null)
         fi
         if [[ "$img_width" -lt "$min_width_desired" || "$img_height" -lt "$min_height_desired" ]]; then
             action=$(notify-send "Upscale?" \
@@ -470,5 +470,39 @@ main() {
 
     switch "$imgpath" "$mode_flag" "$type_flag" "$color_flag" "$color"
 }
+
+
+# --- wallpaper reveal transition (modules/ii/wallpaperTransition) -------------------------
+# Freezes the screen under an overlay, lets everything change underneath, then the overlay
+# reveals the new look with a circle. Every step is optional: if anything is missing, or the
+# overlay is not registered / disabled, this does nothing and the change happens as normal.
+wp_t() { printf '%s %s\n' "$1" "$EPOCHREALTIME" >> /tmp/wp-timing.log; } # WPTIMING
+wp_transition_begin() {
+    wp_t sw_start # WPTIMING
+    [[ " $* " == *" --noswitch "* ]] && return 0
+    command -v grim >/dev/null 2>&1 && command -v hyprctl >/dev/null 2>&1 || return 0
+    qs -c "$QUICKSHELL_CONFIG_NAME" ipc show 2>/dev/null | grep -q wpTransition || return 0
+    local dir=/tmp/wp-transition stamp out cur resp
+    stamp=$(date +%s%N)
+    mkdir -p "$dir"
+    for out in $(hyprctl monitors -j | jq -r '.[].name'); do
+        grim -t ppm -o "$out" "$dir/$stamp-$out.ppm" || return 0
+    done
+    cur=$(hyprctl cursorpos | tr -d ' ')
+    resp=$(qs -c "$QUICKSHELL_CONFIG_NAME" ipc call wpTransition begin "${cur%,*}" "${cur#*,}" "$stamp" 2>/dev/null) || return 0
+    [[ "$resp" == "ok" ]] || return 0
+    WP_TRANSITION_ACTIVE=1
+    # wait (max ~1.5s) until the overlay confirms it is painted
+    for _ in $(seq 60); do [[ -e "$dir/$stamp.ready" ]] && break; sleep 0.025; done
+    wp_t frozen # WPTIMING
+}
+wp_transition_end() {
+    wp_t sw_end # WPTIMING
+    [[ -n "${WP_TRANSITION_ACTIVE:-}" ]] && qs -c "$QUICKSHELL_CONFIG_NAME" ipc call wpTransition end >/dev/null 2>&1
+    return 0
+}
+trap wp_transition_end EXIT
+wp_transition_begin "$@"
+# -------------------------------------------------------------------------------------------
 
 main "$@"

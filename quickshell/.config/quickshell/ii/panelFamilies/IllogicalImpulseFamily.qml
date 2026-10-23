@@ -24,6 +24,7 @@ import qs.modules.ii.verticalBar
 import qs.modules.ii.packageInstaller
 import qs.modules.ii.wallpaperSelector
 import qs.modules.ii.wallpaperPicker
+import qs.modules.ii.wallpaperTransition
 
 Scope {
     PanelLoader { extraCondition: !Config.options.bar.vertical; component: Bar {} }
@@ -48,4 +49,5 @@ Scope {
     PanelLoader { component: WallpaperSelector {} }
     PanelLoader { component: PackageInstaller {} }
     PanelLoader { component: WallpaperPicker {} }
+    PanelLoader { component: WallpaperTransition {} }
 }
