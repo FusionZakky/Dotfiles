@@ -169,6 +169,10 @@ Singleton {
                     property int featherPx: 90     // softness of the circle's edge
                     property int settleMs: 450     // wait after the colour script exits, before revealing
                     property int timeoutMs: 8000   // safety: reveal anyway if the script never reports back
+                    property bool fastColorSource: false // colour tools read a downscaled copy of very large images (faster, palette shifts a few hex units)
+                    property int fastColorMinPx: 5000    // only images whose long side is at least this many pixels use the downscaled copy
+                    property bool closePickerOnApply: true // close the wallpaper picker as soon as a wallpaper is set
+                    property int pickerCloseDelayMs: 0     // 0 = close the picker hidden underneath the overlay (no wait). >0 = close it first and wait this many ms before the screenshot (the picker needs ~460)
                 }
                 property JsonObject widgets: JsonObject {
                     property JsonObject clock: JsonObject {

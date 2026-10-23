@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Upscales an image (Lanczos) so it covers the largest monitor, but ONLY if it is smaller.
 # Images that already fit are never touched. Always exits 0 so callers can chain safely.
-printf '%s %s\n' fit_start "$EPOCHREALTIME" >> /tmp/wp-timing.log # WPTIMING
-trap 'printf "%s %s\n" fit_end "$EPOCHREALTIME" >> /tmp/wp-timing.log' EXIT # WPTIMING
 f="$1"
 [ -f "$f" ] || exit 0
 command -v magick >/dev/null 2>&1 || exit 0

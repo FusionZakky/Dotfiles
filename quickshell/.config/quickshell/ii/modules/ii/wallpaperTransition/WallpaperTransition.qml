@@ -3,6 +3,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import qs
 import qs.modules.common
 
 /**
@@ -30,6 +31,7 @@ Scope {
     property real cursorY: 0
     property real progress: 0
     property int imagesSettled: 0
+    property bool closePickerWhenReady: false // hidden close: shut the picker once the overlay is painted
 
     IpcHandler {
         target: "wpTransition"
@@ -37,6 +39,19 @@ Scope {
             if (!root.cfg.enable) return "off";
             root.start(x, y, stamp);
             return "ok";
+        }
+        // First call from switchwall.sh: closes the wallpaper picker if it is open (so it is not in the
+        // screenshot) and says how long to wait for its slide-out. Doubles as the "is the overlay loaded" check.
+        function prepare(): string {
+            const closing = root.cfg.closePickerOnApply && GlobalStates.wallpaperPickerOpen;
+            const delay = Math.max(0, root.cfg.pickerCloseDelayMs);
+            if (!root.cfg.enable) {
+                if (closing) GlobalStates.wallpaperPickerOpen = false;
+                return "off";
+            }
+            root.closePickerWhenReady = closing && delay === 0;
+            if (closing && delay > 0) GlobalStates.wallpaperPickerOpen = false;
+            return closing ? `open:${delay}` : "closed";
         }
         function end(): void {
             root.release();
@@ -68,7 +83,6 @@ Scope {
         failsafe.stop();
         settleTimer.stop();
         if (!root.active || revealAnim.running) return;
-        Quickshell.execDetached(["bash", "-c", "printf '%s %s\\n' reveal $EPOCHREALTIME >> /tmp/wp-timing.log"]); // WPTIMING
         revealAnim.duration = root.cfg.durationMs;
         revealAnim.restart();
     }
@@ -90,7 +104,16 @@ Scope {
     // Never leave a frozen screen behind if the script dies before reporting back
     Timer { id: failsafe; onTriggered: root.reveal() }
     // Small delay so the overlay has really been painted before the script is told to go ahead
-    Timer { id: readyTimer; interval: 60; onTriggered: { readyProc.command = ["touch", `${root.dir}/${root.stamp}.ready`]; readyProc.running = true } }
+    Timer {
+        id: readyTimer
+        interval: 60
+        onTriggered: {
+            readyProc.command = ["touch", `${root.dir}/${root.stamp}.ready`];
+            readyProc.running = true;
+            // hidden close: the picker goes away underneath the painted overlay, so it costs no waiting time
+            if (root.closePickerWhenReady) { root.closePickerWhenReady = false; GlobalStates.wallpaperPickerOpen = false; }
+        }
+    }
     Process { id: readyProc }
     Process { id: cleanupProc }
 

@@ -251,8 +251,9 @@ switch() {
                 exit 1
             fi
         else
-            matugen_args+=(image "$imgpath")
-            generate_colors_material_args=(--path "$imgpath")
+            colorsrc=$(wp_colorsrc "$imgpath") # WPFAST
+            matugen_args+=(image "$colorsrc")
+            generate_colors_material_args=(--path "$colorsrc")
             # Update wallpaper path in config
             set_wallpaper_path "$imgpath"
             remove_restore
@@ -303,11 +304,13 @@ switch() {
         [[ "$term_fg_boost" != "null" && -n "$term_fg_boost" ]] && generate_colors_material_args+=(--term_fg_boost "$term_fg_boost")
     fi
 
-    matugen "${matugen_args[@]}"
+    matugen "${matugen_args[@]}" & # WPPAR: runs alongside the python generator below
+    wp_matugen_pid=$!
     source "$(eval echo $ILLOGICAL_IMPULSE_VIRTUAL_ENV)/bin/activate"
     python3 "$SCRIPT_DIR/generate_colors_material.py" "${generate_colors_material_args[@]}" \
         > "$STATE_DIR"/user/generated/material_colors.scss
     deactivate
+    wait "$wp_matugen_pid" # WPPAR
     "$SCRIPT_DIR"/applycolor.sh
 
     # Pass screen width, height, and wallpaper path to post_process
@@ -476,13 +479,17 @@ main() {
 # Freezes the screen under an overlay, lets everything change underneath, then the overlay
 # reveals the new look with a circle. Every step is optional: if anything is missing, or the
 # overlay is not registered / disabled, this does nothing and the change happens as normal.
-wp_t() { printf '%s %s\n' "$1" "$EPOCHREALTIME" >> /tmp/wp-timing.log; } # WPTIMING
 wp_transition_begin() {
-    wp_t sw_start # WPTIMING
     [[ " $* " == *" --noswitch "* ]] && return 0
     command -v grim >/dev/null 2>&1 && command -v hyprctl >/dev/null 2>&1 || return 0
-    qs -c "$QUICKSHELL_CONFIG_NAME" ipc show 2>/dev/null | grep -q wpTransition || return 0
-    local dir=/tmp/wp-transition stamp out cur resp
+    local dir=/tmp/wp-transition stamp out cur resp prep delay
+    # close the wallpaper picker first (so it is not in the screenshot); also confirms the overlay is loaded
+    prep=$(qs -c "$QUICKSHELL_CONFIG_NAME" ipc call wpTransition prepare 2>/dev/null) || return 0
+    case "$prep" in
+        open:*) delay=${prep#open:}; if (( delay > 0 )); then printf -v delay '%d.%03d' $((delay / 1000)) $((delay % 1000)); sleep "$delay"; fi ;;
+        closed) ;;
+        *) return 0 ;;
+    esac
     stamp=$(date +%s%N)
     mkdir -p "$dir"
     for out in $(hyprctl monitors -j | jq -r '.[].name'); do
@@ -494,12 +501,33 @@ wp_transition_begin() {
     WP_TRANSITION_ACTIVE=1
     # wait (max ~1.5s) until the overlay confirms it is painted
     for _ in $(seq 60); do [[ -e "$dir/$stamp.ready" ]] && break; sleep 0.025; done
-    wp_t frozen # WPTIMING
 }
 wp_transition_end() {
-    wp_t sw_end # WPTIMING
     [[ -n "${WP_TRANSITION_ACTIVE:-}" ]] && qs -c "$QUICKSHELL_CONFIG_NAME" ipc call wpTransition end >/dev/null 2>&1
     return 0
+}
+# Colour source: the image the colour tools (matugen + python) read. Normally the wallpaper itself.
+# With background.transition.fastColorSource=true, very large images are replaced by a cached <=1920px copy
+# (the wallpaper you see is untouched). Falls back to the original on any problem.
+wp_colorsrc() { # WPFAST
+    local img="$1" on min w h key out
+    on=$(jq -r '.background.transition.fastColorSource // false' "$SHELL_CONFIG_FILE" 2>/dev/null)
+    [[ "$on" == "true" ]] || { echo "$img"; return 0; }
+    min=$(jq -r '.background.transition.fastColorMinPx // 5000' "$SHELL_CONFIG_FILE" 2>/dev/null)
+    read -r w h < <(identify -ping -format '%w %h\n' "${img}[0]" 2>/dev/null | head -n 1)
+    [[ -n "${w:-}" && -n "${h:-}" ]] && (( (w > h ? w : h) >= min )) || { echo "$img"; return 0; }
+    key=$(stat -c '%n %s %Y' "$img" | sha1sum | cut -c1-16)
+    out="$CACHE_DIR/colorsrc/$key.png"
+    if [[ ! -s "$out" ]]; then
+        mkdir -p "$CACHE_DIR/colorsrc"
+        if command -v vipsthumbnail >/dev/null 2>&1; then
+            vipsthumbnail "$img" --size 1920x1920 -o "$out.tmp.png[compression=1]" >/dev/null 2>&1
+        else
+            magick -define jpeg:size=3840x3840 "${img}[0]" -resize '1920x1920>' -strip -quality 10 "$out.tmp.png" >/dev/null 2>&1
+        fi
+        if [[ -s "$out.tmp.png" ]]; then mv "$out.tmp.png" "$out"; else rm -f "$out.tmp.png"; echo "$img"; return 0; fi
+    fi
+    echo "$out"
 }
 trap wp_transition_end EXIT
 wp_transition_begin "$@"
