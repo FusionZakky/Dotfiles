@@ -163,3 +163,8 @@ end, { description = "Geometry test: write" })
 -- Force-close the SDDM test window instantly (SUPER+Q waits for the greeter to shut down politely)
 hl.bind("SUPER + SHIFT + Q", hl.dsp.exec_cmd("pkill -9 -f '[s]ddm-greeter-qt6 --test-mode'"),
     { description = "Window: Force-close sddm test window" })
+
+-- Lock key (KEY_SLEEP / XF86Sleep): hold to lock (set-lock-hold changes the time), a tap does nothing
+hl.bind("XF86Sleep", hl.dsp.exec_cmd("~/.local/bin/lockkey-hold start"), { locked = true })
+hl.bind("XF86Sleep", hl.dsp.exec_cmd("~/.local/bin/lockkey-hold stop"), { locked = true, release = true })
+hl.bind("XF86Sleep", hl.dsp.global("quickshell:lockHold"), { locked = true })

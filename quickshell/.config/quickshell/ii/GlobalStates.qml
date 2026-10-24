@@ -24,6 +24,8 @@ Singleton {
     property bool screenLocked: false
     property bool screenLockContainsCharacters: false
     property bool screenUnlockFailed: false
+    property bool lockPreview: false
+    property int lockPreviewMs: 400
     property bool screenTranslatorOpen: false
     property bool sessionOpen: false
     property bool superDown: false
@@ -56,6 +58,22 @@ Singleton {
         }
         onReleased: {
             root.superDown = false
+        }
+    }
+
+    onScreenLockedChanged: {
+        if (!root.screenLocked) root.lockPreview = false
+    }
+
+    GlobalShortcut {
+        name: "lockHold"
+        description: "Hold the lock key to start the lock animation, release early to cancel it"
+
+        onPressed: {
+            root.lockPreview = true
+        }
+        onReleased: {
+            root.lockPreview = false
         }
     }
 }

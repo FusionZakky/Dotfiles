@@ -200,24 +200,24 @@ Variants {
 
             Loader {
                 id: blurLoader
-                active: Config.options.lock.blur.enable && (GlobalStates.screenLocked || scaleAnim.running)
+                active: Config.options.lock.blur.enable && (GlobalStates.screenLocked || GlobalStates.lockPreview || scaleAnim.running)
                 anchors.fill: wallpaper
-                scale: GlobalStates.screenLocked ? Config.options.lock.blur.extraZoom : 1
+                scale: (GlobalStates.screenLocked || GlobalStates.lockPreview) ? Config.options.lock.blur.extraZoom : 1
                 Behavior on scale {
                     NumberAnimation {
                         id: scaleAnim
-                        duration: 400
+                        duration: GlobalStates.lockPreviewMs
                         easing.type: Easing.BezierSpline
                         easing.bezierCurve: Appearance.animationCurves.expressiveDefaultSpatial
                     }
                 }
                 sourceComponent: GaussianBlur {
                     source: wallpaper
-                    radius: GlobalStates.screenLocked ? Config.options.lock.blur.radius : 0
+                    radius: (GlobalStates.screenLocked || GlobalStates.lockPreview) ? Config.options.lock.blur.radius : 0
                     samples: radius * 2 + 1
 
                     Rectangle {
-                        opacity: GlobalStates.screenLocked ? 1 : 0
+                        opacity: (GlobalStates.screenLocked || GlobalStates.lockPreview) ? 1 : 0
                         anchors.fill: parent
                         color: CF.ColorUtils.transparentize(Appearance.colors.colLayer0, 0.7)
                     }

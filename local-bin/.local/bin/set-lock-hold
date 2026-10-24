@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# set-lock-hold <seconds>   e.g. set-lock-hold 1.2
+# Changes how long the lock key must be held before the screen locks, and sets the preview slide to finish
+# to end right at the lock (the preview starts 0.25s into the hold).
+set -eu
+s="${1:-}"
+[ -n "$s" ] || { echo "usage: set-lock-hold <seconds>   (e.g. 0.8, 1, 1.2)"; exit 1; }
+python3 - "$s" <<'PYEOF'
+import os, re, sys
+s = float(sys.argv[1])
+if not (0.2 <= s <= 5):
+    sys.exit("pick something between 0.2 and 5 seconds")
+speed = max(2.0, round((s - 0.25) * 10, 1))
+helper = os.path.expanduser("~/.local/bin/lockkey-hold")
+lock = os.path.expanduser("~/.config/quickshell/ii/modules/ii/lock/Lock.qml")
+h = open(helper).read()
+h2, n1 = re.subn(r"\( sleep [0-9.]+;", "( sleep %s;" % ("%g" % s), h)
+l = open(lock).read()
+l2, n2 = re.subn(r"(property real previewSpeed: )[0-9.]+", lambda m: m.group(1) + ("%g" % speed), l, count=1)
+if n1 != 1 or n2 != 1:
+    sys.exit("could not find the values to change (helper: %d, Lock.qml: %d)" % (n1, n2))
+open(helper, "w").write(h2)
+open(lock, "w").write(l2)
+print("hold set to %gs, preview slide speed %g (about %gs long)" % (s, speed, speed / 10))
+PYEOF

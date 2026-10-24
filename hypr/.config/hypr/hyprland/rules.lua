@@ -172,3 +172,8 @@ hl.layer_rule({ match = { namespace = "gtk4-layer-shell" }, no_anim = true})
 
 -- Wallpaper reveal overlay: no open/close pop animation (modules/ii/wallpaperTransition)
 hl.layer_rule({ match = { namespace = "quickshell:wallpaperTransition" }, no_anim = true})
+
+-- Lock preview blur layer: blurs everything behind it (windows included) with a plain fade (modules/ii/lock/Lock.qml)
+hl.layer_rule({ match = { namespace = "quickshell:lockBlur" }, xray = false })
+hl.layer_rule({ match = { namespace = "quickshell:lockBlur" }, ignore_alpha = 0 })
+hl.layer_rule({ match = { namespace = "quickshell:lockBlur" }, animation = "fade" })

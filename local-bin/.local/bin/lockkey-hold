@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# lockkey-hold start|stop
+# start: arm a 1s timer, lock the session when it fires
+# stop : disarm (key released before 3s)
+pidf="${XDG_RUNTIME_DIR:-/tmp}/lockkey-hold.pid"
+case "${1:-}" in
+  start)
+    # ignore key auto-repeat: timer already armed
+    if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then exit 0; fi
+    ( sleep 1.2; rm -f "$pidf"; loginctl lock-session ) >/dev/null 2>&1 &
+    echo $! > "$pidf"
+    ;;
+  stop)
+    if [ -f "$pidf" ]; then
+      kill "$(cat "$pidf")" 2>/dev/null
+      rm -f "$pidf"
+    fi
+    ;;
+esac
+exit 0
