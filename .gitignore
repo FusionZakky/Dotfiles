@@ -9,3 +9,5 @@ micro/.config/micro/buffers/
 
 __pycache__/
 *.pyc
+# Manual one-off backups
+*.before-*
