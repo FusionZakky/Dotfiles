@@ -173,6 +173,12 @@ def main(argv):
             r = unload_plugin()
         r["enabled"] = on
         return r
+    if cmd == "reapply":
+        # a Hyprland reload resets the plugin to its defaults: put the saved look back (never re-adds the window rules)
+        if not (read_state().get("enabled") and core.plugin_loaded()):
+            return {"skipped": True}
+        s = core.save_and_apply(core.read_config())
+        return {"settings": s, "message": core.LAST_MESSAGE}
     if cmd == "startup":
         st = read_state()
         res = {"auto": bool(st.get("auto", False)), "enabled": bool(st.get("enabled", False)), "plugin": core.plugin_loaded()}

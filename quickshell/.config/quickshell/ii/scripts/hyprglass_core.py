@@ -64,7 +64,7 @@ def tint_hex(s):
     alpha = round(s["alpha"] * 255 / 100)
     return f"0x{rgb}{alpha:02X}"
 
-def make_lua(s):
+def make_lua(s, enabled=True):
     t = tint_hex(s)
     return (
         'if hl.plugin.hyprglass then local hg = hl.plugin.hyprglass; '
@@ -72,7 +72,7 @@ def make_lua(s):
         f'glass_opacity = {s["opacity"]/100:.2f}, blur_strength = {s["blur"]:.2f}, '
         f'dark = {{ tint_color = {t}, brightness = {s["brightness"]/100:.2f} }} '
         '}); '
-        f'hg.config({{ enabled = false, default_theme = "dark", '
+        f'hg.config({{ enabled = {str(bool(enabled)).lower()}, default_theme = "dark", '
         f'default_preset = "dark_crimson", tint_color = {t} }}); end'
     )
 
@@ -100,7 +100,13 @@ def save_and_apply(settings):
             if not n:
                 raise RuntimeError(f"Couldn't update trial config field: {pattern}")
         CONFIG.write_text(text)
-        result = subprocess.run(["hyprctl", "eval", make_lua(s)], capture_output=True, text=True, timeout=8)
+        try:
+            state = json.loads(STATE_FILE.read_text())
+            enabled = bool(state.get("enabled", True))
+        except (OSError, json.JSONDecodeError):
+            enabled = True
+        # the plugin's global switch stays off: only windows tagged by the foot/kitty rules get glass
+        result = subprocess.run(["hyprctl", "eval", make_lua(s, False)], capture_output=True, text=True, timeout=8)
         output = (result.stdout + result.stderr).strip()
         if result.returncode != 0 or "error:" in output.lower():
             LAST_MESSAGE = "Apply failed: " + (output or f"hyprctl exit {result.returncode}")
