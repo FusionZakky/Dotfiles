@@ -103,6 +103,23 @@ Scope {
     }
     Component.onCompleted: glassInitProc.running = true
 
+    // A Hyprland config reload (ii triggers one on every wallpaper change) resets HyprGlass to its defaults, so put the saved look back
+    property bool glassReapplyPending: false
+    Process {
+        id: glassReapplyProc
+        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/ii/scripts/hyprglass_ctl.py", "reapply"]
+        onExited: { if (root.glassReapplyPending) { root.glassReapplyPending = false; glassReapplyProc.running = true } }
+    }
+    Timer {
+        id: glassReapplyDelay
+        interval: 400
+        onTriggered: { if (glassReapplyProc.running) root.glassReapplyPending = true; else glassReapplyProc.running = true }
+    }
+    Connections {
+        target: Hyprland
+        function onRawEvent(event) { if (event.name === "configreloaded") glassReapplyDelay.restart() }
+    }
+
     function toggleWallpaperPicker() {
         GlobalStates.wallpaperPickerOpen = !GlobalStates.wallpaperPickerOpen
     }

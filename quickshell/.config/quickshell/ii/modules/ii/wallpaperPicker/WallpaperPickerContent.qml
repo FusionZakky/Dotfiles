@@ -739,9 +739,13 @@ fi${fitCmd}${applyCmd}
         if (j.error) { root.gStatus = j.error; return }
         root.gPlugin = j.plugin === true
         root.gAuto = j.auto === true
+        const previousWallpaper = root.gWallpaper
         root.gWallpaper = String(j.wallpaper || "")
         root.gPvImages = j.images || []
-        if (root.gWallpaper.length === 0 && root.gPvImages.length > 0 && root.gPvIdx < 0) root.gPvIdx = 0
+        if (previousWallpaper !== root.gWallpaper) {
+            root.gPvIdx = root.gPvImages.indexOf(root.gWallpaper)
+            root.glassLoadPalette()
+        }
         let list = []
         Object.keys(j.builtins || {}).forEach(n => list.push({ name: n, custom: false, s: j.builtins[n] }))
         Object.keys(j.custom || {}).forEach(n => list.push({ name: n, custom: true, s: j.custom[n] }))
@@ -860,7 +864,20 @@ fi${fitCmd}${applyCmd}
         glassEnableProc.running = true
     }
     function glassPvPath() {
-        return root.gWallpaper
+        return root.gPvIdx >= 0 && root.gPvIdx < root.gPvImages.length
+            ? root.gPvImages[root.gPvIdx]
+            : root.gWallpaper
+    }
+
+    function glassStepPreview(direction) {
+        const count = root.gPvImages.length
+        if (count === 0) return
+
+        let index = root.gPvIdx
+        if (index < 0 || index >= count)
+            index = direction > 0 ? -1 : 0
+
+        root.gPvIdx = (index + direction + count) % count
     }
     Process {
         id: glassUseProc
@@ -1937,8 +1954,17 @@ fi
                                 color: Appearance.colors.colOnLayer2
                                 text: Translation.tr("Live preview") + (root.glassPvPath().length > 0 ? "   |   " + root.glassPvPath().split("/").pop() : "")
                             }
-                            
-                            
+
+                            RippleButton {
+                                buttonText: Translation.tr("Previous")
+                                enabled: root.gPvImages.length > 0
+                                onClicked: root.glassStepPreview(-1)
+                            }
+                            RippleButton {
+                                buttonText: Translation.tr("Next")
+                                enabled: root.gPvImages.length > 0
+                                onClicked: root.glassStepPreview(1)
+                            }
                         }
                         Item {
                             id: glPvMask
