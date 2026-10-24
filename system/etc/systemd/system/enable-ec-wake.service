@@ -1,0 +1,11 @@
+[Unit]
+Description=Enable Chromebook EC (CREC) as an ACPI wake source so lid open wakes from s2idle
+After=sysinit.target
+
+[Service]
+Type=oneshot
+# /proc/acpi/wakeup is a toggle, so only write when CREC is currently disabled
+ExecStart=/bin/sh -c 'grep -E "^CREC" /proc/acpi/wakeup | grep -q disabled && echo CREC > /proc/acpi/wakeup || true'
+
+[Install]
+WantedBy=multi-user.target
