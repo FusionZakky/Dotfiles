@@ -34,6 +34,7 @@ micro
 mkinitcpio
 nano
 network-manager-applet
+networkmanager-openvpn
 nmap
 obsidian
 openbsd-netcat

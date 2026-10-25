@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 import qs.services.network
+import qs.modules.common
 import qs.modules.common.functions
 /**
  * VPN service with nmcli. Lists NetworkManager VPN/WireGuard connection
@@ -18,9 +19,13 @@ Singleton {
     property bool restoredOnStartup: false
     readonly property string materialSymbol: root.connected ? "vpn_lock" : "vpn_key_off"
     property string stateFilePath: ""
+    property string lastUsedPath: ""
+    property string lastUsedUuid: ""
 
     Component.onCompleted: {
         root.stateFilePath = FileUtils.trimFileProtocol(`${Directories.state}/vpn_last_connection`);
+        root.lastUsedPath = FileUtils.trimFileProtocol(`${Directories.state}/vpn_last_used`);
+        lastUsedView.reload();
         Quickshell.execDetached(["mkdir", "-p", FileUtils.trimFileProtocol(Directories.state)]);
     }
 
@@ -30,9 +35,22 @@ Singleton {
     function saveState(): void {
         stateFileView.setText(root.active ? root.active.uuid : "");
     }
+    function rememberLastUsed(uuid: string): void {
+        if (!uuid || uuid === root.lastUsedUuid) return;
+        root.lastUsedUuid = uuid;
+        Quickshell.execDetached(["sh", "-c", "printf '%s' \"$1\" > \"$2\"", "sh", uuid, root.lastUsedPath]);
+    }
     function connectTo(connection: VpnConnection): void {
         root.busy = true;
-        connectProc.exec(["nmcli", "connection", "up", connection.uuid]);
+        // switching: take any other running tunnel down first so two VPNs never fight over the default route
+        const others = root.connections.filter(c => c.active && c.uuid !== connection.uuid);
+        if (others.length > 0) {
+            const cmd = others.map(c => `nmcli connection down uuid ${c.uuid}`).concat([`nmcli connection up uuid ${connection.uuid}`]).join("; ");
+            connectProc.exec(["sh", "-c", cmd]);
+        } else {
+            connectProc.exec(["nmcli", "connection", "up", connection.uuid]);
+        }
+        root.rememberLastUsed(connection.uuid);
     }
     function disconnect(connection: VpnConnection): void {
         root.busy = true;
@@ -40,7 +58,10 @@ Singleton {
     }
     function toggle(): void {
         if (root.active) disconnect(root.active);
-        else if (root.connections.length > 0) connectTo(root.connections[0]);
+        else if (root.connections.length > 0) {
+            // prefer the VPN you used last, not whichever profile NetworkManager lists first
+            connectTo(root.connections.find(c => c.uuid === root.lastUsedUuid) ?? root.connections[0]);
+        }
     }
     function tryRestoreState(): void {
         if (root.restoredOnStartup) return;
@@ -63,6 +84,13 @@ Singleton {
                 // No saved state yet, nothing to restore
             }
         }
+    }
+
+    FileView {
+        id: lastUsedView
+        path: root.lastUsedPath
+        onLoaded: root.lastUsedUuid = text().trim()
+        onLoadFailed: error => root.lastUsedUuid = ""
     }
 
     Process {
@@ -117,6 +145,7 @@ Singleton {
                     }
                 }
                 root.saveState();
+                if (root.active) root.rememberLastUsed(root.active.uuid);
                 root.tryRestoreState();
             }
         }

@@ -19,4 +19,7 @@ hl.workspace_rule({ workspace = "special:dropdown", on_created_empty = "foot --a
 hl.window_rule({ match = { class = "^foot-dropdown$" }, float = true })
 hl.window_rule({ match = { class = "^foot-dropdown$" }, size = {"(monitor_w*0.90)", "(monitor_h*0.45)"} })
 hl.window_rule({ match = { class = "^foot-dropdown$" }, move = {"(monitor_w*0.05)", "(monitor_h*0.04)"} })
+-- same glass look as the other foot windows
+hl.window_rule({ match = { class = "^foot-dropdown$" }, tag = "+hyprglass_enabled" })
+hl.window_rule({ match = { class = "^foot-dropdown$" }, tag = "+hyprglass_preset_dark_crimson" })
 -- <<< dropdown terminal <<<
