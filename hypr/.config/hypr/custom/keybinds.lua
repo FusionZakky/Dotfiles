@@ -168,3 +168,7 @@ hl.bind("SUPER + SHIFT + Q", hl.dsp.exec_cmd("pkill -9 -f '[s]ddm-greeter-qt6 --
 hl.bind("XF86Sleep", hl.dsp.exec_cmd("~/.local/bin/lockkey-hold start"), { locked = true })
 hl.bind("XF86Sleep", hl.dsp.exec_cmd("~/.local/bin/lockkey-hold stop"), { locked = true, release = true })
 hl.bind("XF86Sleep", hl.dsp.global("quickshell:lockHold"), { locked = true })
+
+-- >>> dropdown terminal >>>
+hl.bind("SUPER + T", hl.dsp.workspace.toggle_special("dropdown"), { description = "Dropdown terminal" })
+-- <<< dropdown terminal <<<

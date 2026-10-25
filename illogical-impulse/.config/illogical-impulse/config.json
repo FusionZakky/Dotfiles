@@ -80,7 +80,7 @@
       "workspaceZoom": 1.07
     },
     "thumbnailPath": "",
-    "wallpaperPath": "/home/zakkaria/Pictures/Wallpapers/wallhaven-mlwqdy_1920x1080.png",
+    "wallpaperPath": "/home/zakkaria/Pictures/Wallpapers/wallhaven-yj1z57.png",
     "widgets": {
       "clock": {
         "cookie": {
@@ -128,6 +128,12 @@
         "x": 400,
         "y": 100
       }
+    },
+    "transition": {
+      "durationMs": 1400,
+      "settleMs": 100,
+      "fastColorSource": false,
+      "pickerCloseDelayMs": 0
     }
   },
   "bar": {

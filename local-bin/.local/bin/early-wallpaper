@@ -1,0 +1,41 @@
+#!/bin/bash
+# Shows the current wallpaper the moment Hyprland is up, until Quickshell has drawn its own.
+# SDDM kills the login screen right after your password is accepted (whatever theme is applied), so
+# there is a gap while Hyprland and Quickshell load. This fills the gap with the real wallpaper
+# instead of a plain colour. Theme-independent: it only reads the wallpaper path ii already keeps.
+#   early-wallpaper          normal use (started from custom/execs.lua)
+#   early-wallpaper --check  print what it would do, start nothing
+state=~/.local/state/quickshell/user/generated/wallpaper/path.txt
+log=~/.cache/early-wallpaper.log
+poll=${EW_POLL:-0.3}; settle=${EW_SETTLE:-2}; max=${EW_MAX_POLLS:-130}
+now() { date +%T.%N | cut -c1-12; }
+say() { if [ "${1:-}" = "--check" ]; then shift; echo "$*"; else echo "$(now) $*" >> "$log"; fi; }
+
+mode=${1:-run}
+wp=$(head -1 "$state" 2>/dev/null)
+case "${wp,,}" in
+  *.png|*.jpg|*.jpeg|*.webp|*.bmp) ;;
+  *) [ "$mode" = "--check" ] && echo "wallpaper '$wp' is not a still image, would do nothing"; exit 0;;
+esac
+[ -f "$wp" ] || { [ "$mode" = "--check" ] && echo "wallpaper file missing: $wp"; exit 0; }
+command -v swaybg >/dev/null || { [ "$mode" = "--check" ] && echo "swaybg not installed"; exit 0; }
+if hyprctl layers 2>/dev/null | grep -q quickshell; then
+  [ "$mode" = "--check" ] && echo "Quickshell already up (this is a reload, would do nothing)"
+  exit 0
+fi
+if [ "$mode" = "--check" ]; then echo "would show $wp with swaybg until Quickshell's layers appear"; exit 0; fi
+
+say "start: showing $wp"
+swaybg -i "$wp" -m fill &
+pid=$!
+sleep 0.5
+kill -0 "$pid" 2>/dev/null || say "swaybg exited early (display not ready?)"
+n=0
+while [ "$n" -lt "$max" ]; do
+  hyprctl layers 2>/dev/null | grep -q quickshell && { say "quickshell layers seen after ~$(awk "BEGIN{print $n*$poll}")s"; break; }
+  n=$((n+1)); sleep "$poll"
+done
+sleep "$settle"
+kill "$pid" 2>/dev/null
+say "done (swaybg removed)"
+tail -n 60 "$log" > "$log.tmp" 2>/dev/null && mv "$log.tmp" "$log"

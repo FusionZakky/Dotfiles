@@ -58,6 +58,7 @@ strace
 subversion
 sudo
 sushi
+swaybg
 swaync
 system-config-printer
 tailscale
