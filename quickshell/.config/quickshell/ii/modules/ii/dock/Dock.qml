@@ -14,7 +14,7 @@ import Quickshell.Hyprland
 
 Scope { // Scope
     id: root
-    property bool pinned: Config.options?.dock.pinnedOnStartup ?? false
+    property bool pinned: (Config.options?.dock.pinnedOnStartup ?? false) || TabletMode.active
 
     Variants {
         // For each monitor
@@ -41,7 +41,7 @@ Scope { // Scope
             WlrLayershell.namespace: "quickshell:dock"
             color: "transparent"
 
-            implicitHeight: (Config.options?.dock.height ?? 70) + Appearance.sizes.elevationMargin + Appearance.sizes.hyprlandGapsOut
+            implicitHeight: (TabletMode.active ? 78 : (Config.options?.dock.height ?? 70)) + Appearance.sizes.elevationMargin + Appearance.sizes.hyprlandGapsOut
 
             mask: Region {
                 item: dockMouseArea
@@ -102,6 +102,7 @@ Scope { // Scope
                             property real padding: 5
 
                             VerticalButtonGroup {
+                                visible: !TabletMode.active
                                 Layout.topMargin: Appearance.sizes.hyprlandGapsOut // why does this work
                                 GroupButton {
                                     // Pin button
@@ -120,7 +121,7 @@ Scope { // Scope
                                     }
                                 }
                             }
-                            DockSeparator {}
+                            DockSeparator { visible: !TabletMode.active }
                             DockApps {
                                 id: dockApps
                                 buttonPadding: dockRow.padding
@@ -128,7 +129,10 @@ Scope { // Scope
                             DockSeparator {}
                             DockButton {
                                 Layout.fillHeight: true
-                                onClicked: GlobalStates.overviewOpen = !GlobalStates.overviewOpen
+                                onClicked: {
+                                    if (TabletMode.active) TabletMode.gridOpen = !TabletMode.gridOpen;
+                                    else GlobalStates.overviewOpen = !GlobalStates.overviewOpen;
+                                }
                                 topInset: Appearance.sizes.hyprlandGapsOut + dockRow.padding
                                 bottomInset: Appearance.sizes.hyprlandGapsOut + dockRow.padding
                                 contentItem: MaterialSymbol {
@@ -136,6 +140,49 @@ Scope { // Scope
                                     horizontalAlignment: Text.AlignHCenter
                                     font.pixelSize: parent.width / 2
                                     text: "apps"
+                                    color: Appearance.colors.colOnLayer0
+                                }
+                            }
+                            DockSeparator { visible: TabletMode.active }
+                            DockButton { // tablet only: on-screen keyboard
+                                visible: TabletMode.active
+                                Layout.fillHeight: true
+                                onClicked: GlobalStates.oskOpen = !GlobalStates.oskOpen
+                                topInset: Appearance.sizes.hyprlandGapsOut + dockRow.padding
+                                bottomInset: Appearance.sizes.hyprlandGapsOut + dockRow.padding
+                                contentItem: MaterialSymbol {
+                                    anchors.fill: parent
+                                    horizontalAlignment: Text.AlignHCenter
+                                    font.pixelSize: parent.width / 2
+                                    text: "keyboard"
+                                    color: GlobalStates.oskOpen ? Appearance.m3colors.m3primary : Appearance.colors.colOnLayer0
+                                }
+                            }
+                            DockButton { // tablet only: lock the screen
+                                visible: TabletMode.active
+                                Layout.fillHeight: true
+                                onClicked: Quickshell.execDetached(["qs", "-c", "ii", "ipc", "call", "lock", "activate"])
+                                topInset: Appearance.sizes.hyprlandGapsOut + dockRow.padding
+                                bottomInset: Appearance.sizes.hyprlandGapsOut + dockRow.padding
+                                contentItem: MaterialSymbol {
+                                    anchors.fill: parent
+                                    horizontalAlignment: Text.AlignHCenter
+                                    font.pixelSize: parent.width / 2
+                                    text: "lock"
+                                    color: Appearance.colors.colOnLayer0
+                                }
+                            }
+                            DockButton { // tablet only: close the focused window
+                                visible: TabletMode.active
+                                Layout.fillHeight: true
+                                onClicked: Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.window.close()"])
+                                topInset: Appearance.sizes.hyprlandGapsOut + dockRow.padding
+                                bottomInset: Appearance.sizes.hyprlandGapsOut + dockRow.padding
+                                contentItem: MaterialSymbol {
+                                    anchors.fill: parent
+                                    horizontalAlignment: Text.AlignHCenter
+                                    font.pixelSize: parent.width / 2
+                                    text: "close"
                                     color: Appearance.colors.colOnLayer0
                                 }
                             }

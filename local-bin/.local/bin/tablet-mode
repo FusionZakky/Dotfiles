@@ -1,0 +1,149 @@
+#!/bin/bash
+# tablet-mode: screen auto-rotate for the Flex 5 while the screen is folded back (tablet mode).
+# The cros_ec_buttons switch (see custom/keybinds.lua) calls "on" and "off". While on, the accelerometer
+# in the screen (via iio-sensor-proxy) drives the monitor, touchscreen and stylus transforms together.
+#   tablet-mode on | off        called by the switch binds
+#   tablet-mode init            reads the real fold position (login and config reloads)
+#   tablet-mode status
+#   tablet-mode test            turn the screen 90 degrees for 4 s, then back (checks hyprctl eval works)
+#   tablet-mode rotate <normal|left-up|bottom-up|right-up>
+out=eDP-1
+touch=gdix0000:00-27c6:0eba
+pen=gdix0000:00-27c6:0eba-stylus
+rt=${XDG_RUNTIME_DIR:-/tmp}   # tmpfs: the state can never outlive a login session
+state=$rt/tablet-mode
+rot=$rt/tablet-rotated
+base=~/.local/state/tablet-mode.base
+pidf=~/.local/state/tablet-mode.pid
+log=~/.cache/tablet-mode.log
+self=$(readlink -f "$0")
+mkdir -p ~/.local/state ~/.cache
+[ -e "$state" ] || echo 0 > "$state"   # empty/zero until the first fold; also keeps Quickshell's file watch quiet
+[ -e "$rot" ] || : > "$rot"
+
+say() { echo "$(date +%T.%N | cut -c1-12) $*" >> "$log"; }
+tf() { case "$1" in normal) echo 0;; left-up) echo 1;; bottom-up) echo 2;; right-up) echo 3;; *) echo "";; esac; }
+
+# Remember the monitor's real mode / position / scale while it is upright, so every later change can pass
+# them explicitly. A partial rule (transform only) made the scale jump and never come back.
+save_base() {
+  hyprctl monitors -j 2>/dev/null | OUT="$out" python3 -c '
+import json, os, sys
+for m in json.load(sys.stdin):
+    if m["name"] == os.environ["OUT"] and m["transform"] == 0:
+        print("mode=%dx%d@%.2f" % (m["width"], m["height"], m["refreshRate"]))
+        print("pos=%dx%d" % (m["x"], m["y"]))
+        print("scale=%s" % round(float(m["scale"]), 6))
+' > "$base.tmp" 2>/dev/null
+  if [ -s "$base.tmp" ]; then mv "$base.tmp" "$base"; say "saved monitor settings: $(tr '\n' ' ' < "$base")"; else rm -f "$base.tmp"; fi
+}
+
+# monitor, touchscreen and stylus must always carry the same transform (touch does not inherit it)
+apply() {
+  local n=$1 expr r mexpr mode pos scale
+  echo "$n" > "$rt/tablet-transform"
+  if [ -f "$base" ]; then
+    . "$base"
+    mexpr="hl.monitor({ output = \"$out\", mode = \"$mode\", position = \"$pos\", scale = $scale, transform = $n })"
+  else
+    mexpr="hl.monitor({ output = \"$out\", transform = $n })"; say "no saved monitor settings, partial update"
+  fi
+  for expr in "$mexpr" \
+              "hl.device({ name = \"$touch\", transform = $n })" \
+              "hl.device({ name = \"$pen\", transform = $n })"; do
+    r=$(hyprctl eval "$expr" 2>&1)
+    case "${r,,}" in *ok*) ;; *) say "eval failed: $expr -> $r";; esac
+  done
+  say "transform $n"
+}
+
+watch() {
+  echo $$ > "$pidf"
+  trap 'pkill -P $$ 2>/dev/null; exit 0' TERM EXIT
+  local line o n
+  while read -r line; do
+    case "$line" in
+      *"orientation changed: "*)
+        o=${line##*: }; o=${o%% *}; n=$(tf "$o")
+        if [ -n "$n" ]; then say "orientation $o"; date +%s%N > "$rot"; sleep 0.12; apply "$n"; fi;;
+    esac
+  done < <(monitor-sensor --accel 2>/dev/null)
+}
+
+stop_watch() {
+  local p
+  p=$(cat "$pidf" 2>/dev/null)
+  if [ -n "$p" ] && grep -q tablet-mode "/proc/$p/cmdline" 2>/dev/null; then kill "$p" 2>/dev/null; fi
+  rm -f "$pidf"
+}
+
+verify_upright() {
+  local ok
+  ok=$(hyprctl monitors -j 2>/dev/null | OUT="$out" BASE="$base" python3 -c '
+import json, os, sys
+want = None
+try:
+    for l in open(os.environ["BASE"]):
+        if l.startswith("scale="): want = float(l.split("=")[1])
+except OSError:
+    pass
+for m in json.load(sys.stdin):
+    if m["name"] == os.environ["OUT"]:
+        print("yes" if m["transform"] == 0 and (want is None or abs(float(m["scale"]) - want) < 0.01) else "no")
+')
+  if [ "$ok" != "yes" ]; then say "monitor did not come back upright/at the same scale, reloading config"; hyprctl reload >/dev/null 2>&1; fi
+}
+
+read_switch() {
+  python3 - <<'PY'
+import fcntl, os, re
+def event_path(name):
+    try:
+        blocks = open("/proc/bus/input/devices").read().split("\n\n")
+    except OSError:
+        return None
+    for b in blocks:
+        if 'Name="%s"' % name in b:
+            m = re.search(r"event(\d+)", b)
+            if m:
+                return "/dev/input/event" + m.group(1)
+state = 0
+path = event_path("cros_ec_buttons")
+if path:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        buf = bytearray(8)
+        fcntl.ioctl(fd, (2 << 30) | (len(buf) << 16) | (ord("E") << 8) | 0x1b, buf)  # EVIOCGSW
+        state = (buf[0] >> 1) & 1  # SW_TABLET_MODE
+        os.close(fd)
+    except OSError:
+        pass
+print(state)
+PY
+}
+
+gest=~/.local/bin/tablet-gestures
+gpid=$rt/tablet-gestures.pid
+stop_gestures() {
+  local p
+  p=$(cat "$gpid" 2>/dev/null)
+  if [ -n "$p" ] && grep -q tablet-gestures "/proc/$p/cmdline" 2>/dev/null; then kill "$p" 2>/dev/null; fi
+  rm -f "$gpid"
+}
+start_gestures() { stop_gestures; [ -x "$gest" ] && { setsid "$gest" run >/dev/null 2>&1 < /dev/null & }; }
+
+notify() { :; } # on/off notifications removed on request
+
+case "${1:-status}" in
+  on)     stop_watch; start_gestures; save_base; echo 1 > "$state"; setsid "$self" watch >/dev/null 2>&1 < /dev/null & say "tablet mode on"; notify "On: screen follows orientation";;
+  off)    stop_watch; stop_gestures; echo 0 > "$state"; qs -c ii ipc call osk close >/dev/null 2>&1; qs -c ii ipc call search close >/dev/null 2>&1; save_base; apply 0; sleep 0.5; verify_upright; say "tablet mode off"; notify "Off: landscape";;
+  watch)  watch;;
+  init)   s=${TM_FAKE_SWITCH:-$(read_switch)}; if [ "$s" = 1 ]; then "$self" on; else stop_watch; stop_gestures; echo 0 > "$state"; fi; say "init: switch=$s";;
+  rotate) n=$(tf "${2:-}"); [ -n "$n" ] && apply "$n" || echo "usage: tablet-mode rotate normal|left-up|bottom-up|right-up";;
+  test)   save_base; apply 1; sleep 4; apply 0; sleep 0.5; verify_upright; echo "test done, see $log";;
+  status)
+    echo "state: $(cat "$state" 2>/dev/null || echo 0)   watcher: $( [ -f "$pidf" ] && echo "running (pid $(cat "$pidf"))" || echo "not running" )"
+    hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; print("monitor transform:", [(m["name"], m["transform"]) for m in json.load(sys.stdin)])'
+    tail -n 5 "$log" 2>/dev/null;;
+  *) echo "usage: tablet-mode on|off|init|status|test|rotate <orientation>";;
+esac

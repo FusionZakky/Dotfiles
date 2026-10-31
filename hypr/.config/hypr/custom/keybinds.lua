@@ -172,3 +172,9 @@ hl.bind("XF86Sleep", hl.dsp.global("quickshell:lockHold"), { locked = true })
 -- >>> dropdown terminal >>>
 hl.bind("SUPER + T", hl.dsp.workspace.toggle_special("dropdown"), { description = "Dropdown terminal" })
 -- <<< dropdown terminal <<<
+
+-- >>> tablet mode >>>
+-- Folding the screen back (cros_ec_buttons switch) starts auto-rotate; unfolding restores landscape.
+hl.bind("switch:on:cros_ec_buttons",  hl.dsp.exec_cmd(os.getenv("HOME") .. "/.local/bin/tablet-mode on"),  { locked = true })
+hl.bind("switch:off:cros_ec_buttons", hl.dsp.exec_cmd(os.getenv("HOME") .. "/.local/bin/tablet-mode off"), { locked = true })
+-- <<< tablet mode <<<

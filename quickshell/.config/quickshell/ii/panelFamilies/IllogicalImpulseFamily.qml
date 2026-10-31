@@ -30,7 +30,9 @@ Scope {
     PanelLoader { extraCondition: !Config.options.bar.vertical; component: Bar {} }
     PanelLoader { component: Background {} }
     PanelLoader { component: Cheatsheet {} }
-    PanelLoader { extraCondition: Config.options.dock.enable; component: Dock {} }
+    PanelLoader { extraCondition: Config.options.dock.enable || TabletMode.active; component: Dock {} }
+    PanelLoader { extraCondition: TabletMode.active; component: RotateFlash {} }
+    PanelLoader { extraCondition: TabletMode.active; component: AppGrid {} }
     PanelLoader { component: Lock {} }
     PanelLoader { component: MediaControls {} }
     PanelLoader { component: NotificationPopup {} }

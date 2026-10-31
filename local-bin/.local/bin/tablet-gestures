@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""tablet-gestures: the trackpad gestures, for fingers on the screen. Runs only while tablet mode is on.
+
+Mirrors your trackpad config (hyprland/general.lua):
+  3 fingers swipe   -> move the focused window that way in the layout
+  2 fingers pinch   -> pinch out = fullscreen, pinch in = back to tiling (PINCH_FINGERS = 3 for three fingers)
+  4 fingers left/right -> next / previous desktop (1..10, empty ones included, wraps around)
+  4 fingers up/down    -> workspace overview
+Two-finger scrolling is never touched. Two-finger pinch is: apps still get it too, so it zooms AND toggles fullscreen.
+
+  tablet-gestures run        the daemon (started and stopped by `tablet-mode`)
+  tablet-gestures test       30 s: print what it sees and what it would do, change nothing
+  tablet-gestures devices    list input devices and which one it picked as the touchscreen
+Reads the touchscreen read-only (no grab), so the compositor and apps still get every touch.
+"""
+import fcntl, json, os, re, select, struct, subprocess, sys, time
+
+RT = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+PIDF = os.path.join(RT, "tablet-gestures.pid")
+EV_SYN, EV_ABS = 0, 3
+ABS_MT_SLOT, ABS_MT_TRACKING_ID, ABS_MT_X, ABS_MT_Y = 0x2F, 0x39, 0x35, 0x36
+# libinput's calibration matrices, the ones Hyprland uses for a touch device's transform
+MATS = {0: (1, 0, 0, 0, 1, 0), 1: (0, -1, 1, 1, 0, 0), 2: (-1, 0, 1, 0, -1, 1), 3: (0, 1, 0, -1, 0, 1)}
+ARM = 0.03          # seconds the finger count must stay put before measuring starts
+SWIPE3 = (0.075, 0.095)   # 3 fingers: fraction of the screen width / height
+SWIPE4 = (0.10, 0.12)     # 4 fingers
+LIFT = 0.6          # a flick is also judged when fingers lift, at this share of the full thresholds
+PINCH_OUT, PINCH_IN, PINCH_MOVE = 1.25, 0.80, 0.08
+DESKTOPS = 10               # 4-finger swipes step through desktops 1..DESKTOPS (empty ones included) and wrap around
+NEXT_DIRECTION = "left"     # which 4-finger swipe goes to the NEXT desktop (left, like before); "right" flips them
+PINCH_FINGERS = 3           # 2 = two-finger pinch (also zooms inside apps!), 3 = three-finger pinch
+PINCH2_OUT, PINCH2_IN, PINCH2_MOVE = 1.40, 0.70, 0.06   # two-finger pinch must be deliberate and not a scroll
+
+
+LOG = os.path.expanduser("~/.cache/tablet-gestures.log")
+
+
+def log(msg):
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        with open(LOG, "a") as f:
+            f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+        if os.path.getsize(LOG) > 40000:
+            keep = open(LOG).read().splitlines()[-100:]
+            open(LOG, "w").write("\n".join(keep) + "\n")
+    except OSError:
+        pass
+
+
+def abs_info(fd, code):
+    buf = bytearray(24)
+    fcntl.ioctl(fd, (2 << 30) | (24 << 16) | (ord("E") << 8) | (0x40 + code), buf)
+    _v, mn, mx, _f, _fl, _r = struct.unpack("iiiiii", bytes(buf))
+    return mn, mx
+
+
+PROC = os.environ.get("TG_PROC", "/proc/bus/input/devices")
+
+
+def list_devices():
+    """Every input device with an event node: (name, path, direct_input, has_multitouch_slots)."""
+    out = []
+    try:
+        txt = open(PROC).read()
+    except OSError:
+        return out
+    for blk in txt.split("\n\n"):
+        name = re.search(r'N: Name="([^"]*)"', blk)
+        ev = re.search(r"Handlers=.*?\bevent(\d+)", blk)
+        if not (name and ev):
+            continue
+
+        def bits(key):
+            m = re.search(r"^B: %s=(.*)$" % key, blk, re.M)
+            v = 0
+            if m:
+                for w in m.group(1).split():
+                    v = (v << 64) | int(w, 16)
+            return v
+
+        direct = bool(bits("PROP") & 2)                        # INPUT_PROP_DIRECT: a touchscreen, not a touchpad
+        multitouch = bool((bits("ABS") >> ABS_MT_SLOT) & 1 and (bits("ABS") >> ABS_MT_X) & 1)
+        out.append((name.group(1), "/dev/input/event" + ev.group(1), direct, multitouch))
+    return out
+
+
+def find_touchscreen():
+    devs = list_devices()
+    for name, path, direct, mt in devs:                         # by capability: the reliable way
+        if direct and mt:
+            return path
+    for name, path, direct, mt in devs:                         # fallback: anything called touchscreen
+        if "touchscreen" in name.lower():
+            return path
+    return None
+
+
+def transform_now():
+    try:
+        return int(open(os.path.join(RT, "tablet-transform")).read().strip()) % 4
+    except (OSError, ValueError):
+        return 0
+
+
+def current_workspace():
+    try:
+        out = subprocess.run(["hyprctl", "-j", "activeworkspace"], capture_output=True, text=True, timeout=2).stdout
+        return int(json.loads(out)["id"])
+    except Exception:
+        return 1
+
+
+def desktop_target(step):
+    cur = current_workspace()
+    if cur < 1 or cur > DESKTOPS:      # e.g. a special workspace: start from the end we are heading away from
+        cur = 0 if step > 0 else DESKTOPS + 1
+    return (cur - 1 + step) % DESKTOPS + 1
+
+
+def hypr(lua, dry, label):
+    if isinstance(lua, tuple):          # ("desktop", +1/-1): resolved now, against the desktop we are on right now
+        target = desktop_target(lua[1])
+        label = "%s -> desktop %d" % (label, target)
+        lua = "hl.dsp.focus({ workspace = %d })" % target
+    print("gesture:", label, flush=True)
+    if not dry:
+        subprocess.Popen(["hyprctl", "dispatch", lua], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def pinch_hit(n, d, ratio, k):
+    dx, dy = d
+    out0, in0, mv = (PINCH2_OUT, PINCH2_IN, PINCH2_MOVE) if n == 2 else (PINCH_OUT, PINCH_IN, PINCH_MOVE)
+    if abs(dx) >= mv or abs(dy) >= mv:
+        return None
+    who = "%d-finger" % n
+    if ratio > 1 + (out0 - 1) * k:
+        return ("%s pinch out: fullscreen" % who, 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set" })')
+    if ratio < 1 - (1 - in0) * k:
+        return ("%s pinch in: back to tiling" % who, 'hl.dsp.window.fullscreen({ mode = "fullscreen", action = "unset" })')
+    return None
+
+
+def classify(n, d, ratio, k=1.0):
+    """d = centroid movement in screen fractions (dx, dy); k < 1 relaxes the thresholds (used when fingers lift).
+    Returns (label, lua) or None."""
+    dx, dy = d
+    if n == PINCH_FINGERS:
+        hit = pinch_hit(n, d, ratio, k)
+        if hit:
+            return hit
+    if n == 2:
+        return None
+    sx, sy = [v * k for v in (SWIPE3 if n == 3 else SWIPE4)]
+    moved = abs(dx) / sx >= 1 or abs(dy) / sy >= 1
+    horizontal = abs(dx) / sx >= abs(dy) / sy
+    if n == 3:
+        if moved:
+            if horizontal:
+                w = "right" if dx > 0 else "left"
+            else:
+                w = "down" if dy > 0 else "up"
+            return ("3-finger swipe %s: move window %s" % (w, w), 'hl.dsp.window.move({ direction = "%s" })' % w)
+        return None
+    if moved:
+        if horizontal:
+            going_next = (dx > 0) == (NEXT_DIRECTION == "right")
+            way = "right" if dx > 0 else "left"
+            return ("4-finger swipe %s: %s desktop" % (way, "next" if going_next else "previous"),
+                    ("desktop", 1 if going_next else -1))
+        d2 = "up" if dy < 0 else "down"
+        return ("4-finger swipe %s: workspace overview" % d2, 'hl.dsp.global("quickshell:overviewWorkspacesToggle")')
+    return None
+
+
+def run(dev, dry, seconds=None):
+    fd = os.open(dev, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        maxx, maxy = abs_info(fd, ABS_MT_X)[1], abs_info(fd, ABS_MT_Y)[1]
+        points = abs_info(fd, ABS_MT_SLOT)[1] + 1
+    except OSError:   # not a real evdev node (tests use a pipe)
+        maxx, maxy, points = int(os.environ.get("TG_MAXX", 4000)), int(os.environ.get("TG_MAXY", 2500)), 0
+    print("touchscreen %s: %d x %d units, max simultaneous touches: %s" % (dev, maxx, maxy, points or "unknown"), flush=True)
+    if not dry:
+        open(PIDF, "w").write(str(os.getpid()))
+        log("started on %s, max simultaneous touches reported by the device: %s" % (dev, points or "unknown"))
+
+    slots, cur = {}, 0
+    last_n, last_change, base, fired, most = 0, 0.0, None, False, 0
+    last_meas = None   # (fingers, (dx, dy), pinch ratio) of the latest measurement
+    buf, t_end, last_state_check = b"", (time.monotonic() + seconds) if seconds else None, 0.0
+    size = struct.calcsize("llHHi")
+
+    def points_now():
+        return [(x, y) for x, y in slots.values() if x is not None and y is not None]
+
+    def to_screen(p, mat):
+        nx, ny = p[0] / maxx, p[1] / maxy
+        return (mat[0] * nx + mat[1] * ny + mat[2], mat[3] * nx + mat[4] * ny + mat[5])
+
+    def measure(mat):
+        pts = [to_screen(p, mat) for p in points_now()]
+        cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+        spread = sum(((p[0] - cx) ** 2 + (p[1] - cy) ** 2) ** 0.5 for p in pts) / len(pts)
+        return cx, cy, spread
+
+    while True:
+        now = time.monotonic()
+        if t_end and now > t_end:
+            break
+        if not dry and now - last_state_check > 1.0:      # tablet mode ended: leave, whatever else happens
+            last_state_check = now
+            try:
+                if open(os.path.join(RT, "tablet-mode")).read().strip() != "1":
+                    break
+            except OSError:
+                break
+        r, _, _ = select.select([fd], [], [], 0.25)
+        if not r:
+            continue
+        try:
+            chunk = os.read(fd, size * 64)
+        except BlockingIOError:
+            continue
+        if not chunk:
+            time.sleep(0.05)
+            continue
+        buf += chunk
+        while len(buf) >= size:
+            _s, _u, typ, code, val = struct.unpack("llHHi", buf[:size])
+            buf = buf[size:]
+            if typ == EV_ABS:
+                if code == ABS_MT_SLOT:
+                    cur = val
+                elif code == ABS_MT_TRACKING_ID:
+                    if val == -1:
+                        slots.pop(cur, None)
+                    else:
+                        slots[cur] = [None, None]
+                elif code == ABS_MT_X and cur in slots:
+                    slots[cur][0] = val
+                elif code == ABS_MT_Y and cur in slots:
+                    slots[cur][1] = val
+            elif typ == EV_SYN and code == 0:
+                n = len(points_now())
+                t = time.monotonic()
+                if n > most:
+                    most = n
+                    if not dry and n >= 3:
+                        log("saw %d fingers at once" % n)
+                if n != last_n:
+                    if dry:
+                        print("fingers on screen: %d" % n, flush=True)
+                    # fingers lifted during a gesture that never reached the full threshold: judge the flick now
+                    if n < last_n and last_n >= 3 and not fired and last_meas and last_meas[0] == min(last_n, 4):
+                        hit = classify(last_meas[0], last_meas[1], last_meas[2], LIFT)
+                        if hit:
+                            fired = True
+                            if not dry:
+                                log("gesture (on lift): " + hit[0])
+                            hypr(hit[1], dry, hit[0] + " (on lift)")
+                    last_n, last_change, base, last_meas = n, t, None, None
+                if n == 0:
+                    fired = False
+                if n < min(2, PINCH_FINGERS) or fired:
+                    continue
+                mat = MATS[transform_now()]
+                if base is None:
+                    if t - last_change >= ARM:
+                        base = measure(mat)
+                    continue
+                cx, cy, spread = measure(mat)
+                ratio = spread / base[2] if base[2] > 1e-6 else 1.0
+                last_meas = (min(n, 4), (cx - base[0], cy - base[1]), ratio)
+                hit = classify(min(n, 4), (cx - base[0], cy - base[1]), ratio)
+                if hit:
+                    fired = True
+                    if not dry:
+                        log("gesture: " + hit[0])
+                    hypr(hit[1], dry, hit[0])
+    os.close(fd)
+    if dry:
+        print("most fingers seen at once: %d" % most, flush=True)
+    if not dry:
+        try:
+            if open(PIDF).read().strip() == str(os.getpid()):
+                os.remove(PIDF)
+        except OSError:
+            pass
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
+    if cmd == "devices":
+        for name, path, direct, mt in list_devices():
+            print("%-9s %-34s direct-input=%-5s multitouch=%s" % (path.split("/")[-1], name[:34], direct, mt))
+        print("chosen:", os.environ.get("TG_DEVICE") or find_touchscreen())
+        return
+    dev = os.environ.get("TG_DEVICE") or find_touchscreen()
+    if not dev:
+        sys.exit("no touchscreen found")
+    if cmd == "test":
+        print("Test mode (30 s): use 3 and 4 fingers on the screen. Nothing is changed; this prints what would happen.", flush=True)
+        run(dev, True, 30)
+    elif cmd == "run":
+        run(dev, bool(os.environ.get("TG_DRY")))
+    else:
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main()

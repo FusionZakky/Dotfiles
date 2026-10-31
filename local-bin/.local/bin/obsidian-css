@@ -1,0 +1,18 @@
+#!/bin/bash
+# Edit the Obsidian matugen colour template and regenerate the snippet.
+tpl="$HOME/.config/matugen/templates/apps/obsidian-matugen.css"
+regen() {
+  bash "$HOME/.config/quickshell/ii/scripts/colors/switchwall.sh" --noswitch >/dev/null 2>&1
+  echo "regenerated: Obsidian reloads the snippet by itself (Ctrl+R forces it)"
+}
+case "${1:-}" in
+  regen|--regen) regen ;;
+  path|--path) echo "$tpl" ;;
+  -h|--help) echo "obsidian-css [regen|path]   (no argument: open the template in VS Code, regenerate when its tab closes)" ;;
+  *)
+    [ -f "$tpl" ] || { echo "template not found: $tpl"; exit 1; }
+    echo "editing $tpl (close its tab in VS Code to apply)"
+    code --wait "$tpl" >/dev/null 2>&1
+    regen
+    ;;
+esac

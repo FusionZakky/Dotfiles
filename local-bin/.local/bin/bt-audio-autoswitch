@@ -1,0 +1,37 @@
+#!/bin/bash
+# Make a Bluetooth audio output the default sink the moment it appears.
+# Why a watcher instead of a WirePlumber priority rule: an output picked once by hand (or from the
+# ii audio menu) is stored as the "configured default" and beats any priority rule. Setting the
+# default here also updates that stored choice, and when the headphones disconnect WirePlumber falls
+# back to the best remaining sink (the internal speakers) by itself.
+# Only outputs are touched, so the internal mic keeps winning for input.
+
+bt_sink() {
+  pactl list short sinks 2>/dev/null | awk '$2 ~ /^bluez_(output|sink)\./ {print $2; exit}'
+}
+
+apply() {
+  local s cur
+  s=$(bt_sink)
+  [ -n "$s" ] || return 0
+  cur=$(pactl get-default-sink 2>/dev/null)
+  [ "$cur" = "$s" ] && return 0
+  pactl set-default-sink "$s" && logger -t bt-audio-autoswitch "default sink -> $s"
+}
+
+# one line of `pactl subscribe`: Event 'new' on sink #57
+handle_line() {
+  local _e ev _o kind _rest
+  read -r _e ev _o kind _rest <<< "$1"
+  if [ "$ev" = "'new'" ] && [ "$kind" = "sink" ]; then
+    sleep 1   # let the sink finish setting up (A2DP profile negotiation)
+    apply
+  fi
+}
+
+main() {
+  apply   # something may already be connected when the service starts
+  pactl subscribe | while IFS= read -r line; do handle_line "$line"; done
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main; fi

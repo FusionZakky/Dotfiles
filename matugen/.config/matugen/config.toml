@@ -52,3 +52,19 @@ output_path = '~/.local/state/quickshell/user/generated/foot-colors.ini'
 [templates.rice]
 input_path = '~/.config/matugen/templates/rice/colors.sh'
 output_path = '~/.local/state/quickshell/user/generated/rice-colors.sh'
+
+[templates.apps_wal]
+input_path = '~/.config/matugen/templates/apps/wal-colors.json'
+output_path = '~/.cache/wal/colors.json'
+
+[templates.apps_obsidian_1]
+input_path = '~/.config/matugen/templates/apps/obsidian-matugen.css'
+output_path = '/home/zakkaria/Obsidian Files/Knowledge/.obsidian/snippets/matugen.css'
+
+[templates.apps_obsidian_2]
+input_path = '~/.config/matugen/templates/apps/obsidian-matugen.css'
+output_path = '/home/zakkaria/Obsidian Files/Obsidian Files ReMaster/.obsidian/snippets/matugen.css'
+
+[templates.apps_wal_plain]
+input_path = '~/.config/matugen/templates/apps/wal-colors.txt'
+output_path = '~/.cache/wal/colors'

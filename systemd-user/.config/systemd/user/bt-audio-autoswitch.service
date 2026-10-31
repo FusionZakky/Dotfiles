@@ -1,0 +1,12 @@
+[Unit]
+Description=Make Bluetooth audio the default output when it connects
+After=pipewire-pulse.service wireplumber.service
+Wants=pipewire-pulse.service
+
+[Service]
+ExecStart=%h/.local/bin/bt-audio-autoswitch
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

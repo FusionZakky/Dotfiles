@@ -1,15 +1,19 @@
 #!/bin/bash
-# Shows the current wallpaper the moment Hyprland is up, until Quickshell has drawn its own.
+# Shows the current wallpaper the moment Hyprland's display is ready, until Quickshell has drawn its own.
 # SDDM kills the login screen right after your password is accepted (whatever theme is applied), so
 # there is a gap while Hyprland and Quickshell load. This fills the gap with the real wallpaper
 # instead of a plain colour. Theme-independent: it only reads the wallpaper path ii already keeps.
+# swaybg is retried until it stays up (it dies if started before the Wayland display exists), and only
+# one copy runs at a time (Hyprland runs the exec list again on its startup reload).
 #   early-wallpaper          normal use (started from custom/execs.lua)
 #   early-wallpaper --check  print what it would do, start nothing
 state=~/.local/state/quickshell/user/generated/wallpaper/path.txt
 log=~/.cache/early-wallpaper.log
-poll=${EW_POLL:-0.3}; settle=${EW_SETTLE:-2}; max=${EW_MAX_POLLS:-130}
+lock=~/.cache/early-wallpaper.lock
+poll=${EW_POLL:-0.3}; settle=${EW_SETTLE:-2}; max=${EW_MAX_POLLS:-200}; alive=${EW_ALIVE:-0.4}
 now() { date +%T.%N | cut -c1-12; }
-say() { if [ "${1:-}" = "--check" ]; then shift; echo "$*"; else echo "$(now) $*" >> "$log"; fi; }
+say() { echo "$(now) $*" >> "$log"; }
+elapsed() { awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}'; }
 
 mode=${1:-run}
 wp=$(head -1 "$state" 2>/dev/null)
@@ -23,19 +27,36 @@ if hyprctl layers 2>/dev/null | grep -q quickshell; then
   [ "$mode" = "--check" ] && echo "Quickshell already up (this is a reload, would do nothing)"
   exit 0
 fi
-if [ "$mode" = "--check" ]; then echo "would show $wp with swaybg until Quickshell's layers appear"; exit 0; fi
+if [ "$mode" = "--check" ]; then echo "would show $wp with swaybg (retrying until the display is ready) until Quickshell's layers appear"; exit 0; fi
 
-say "start: showing $wp"
-swaybg -i "$wp" -m fill &
-pid=$!
-sleep 0.5
-kill -0 "$pid" 2>/dev/null || say "swaybg exited early (display not ready?)"
-n=0
+exec 9>"$lock"
+flock -n 9 || { say "another copy is already running, exiting"; exit 0; }
+
+t0=$(date +%s.%N)
+say "start: wallpaper $wp"
+pid=""; shown=0; tries=0; n=0
 while [ "$n" -lt "$max" ]; do
-  hyprctl layers 2>/dev/null | grep -q quickshell && { say "quickshell layers seen after ~$(awk "BEGIN{print $n*$poll}")s"; break; }
+  if hyprctl layers 2>/dev/null | grep -q quickshell; then say "quickshell layers seen after ${t0:+$(elapsed)}s"; break; fi
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    tries=$((tries+1))
+    if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+      sock=$(ls "$XDG_RUNTIME_DIR"/wayland-* 2>/dev/null | grep -v '\.lock$' | head -1)
+      [ -n "$sock" ] && export WAYLAND_DISPLAY=${sock##*/}
+    fi
+    swaybg -i "$wp" -m fill >/dev/null 2>>"$log" &
+    pid=$!
+    sleep "$alive"
+    if kill -0 "$pid" 2>/dev/null; then
+      [ "$shown" -eq 0 ] && say "swaybg up after $(elapsed)s (attempt $tries)"
+      shown=1
+    else
+      pid=""
+    fi
+  fi
   n=$((n+1)); sleep "$poll"
 done
+[ "$shown" -eq 0 ] && say "swaybg never stayed up in $(elapsed)s ($tries attempts)"
 sleep "$settle"
-kill "$pid" 2>/dev/null
+[ -n "$pid" ] && kill "$pid" 2>/dev/null
 say "done (swaybg removed)"
 tail -n 60 "$log" > "$log.tmp" 2>/dev/null && mv "$log.tmp" "$log"
